@@ -1,0 +1,5 @@
+slurm_output
+cache
+
+# Files for preparing Jupyter notebooks
+.jupyter_notebook
