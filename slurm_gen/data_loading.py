@@ -75,6 +75,7 @@ class InsufficientSamplesError(Exception):
         s = s % 60
         return '{}:{}:{}'.format(h, m, s)
 
+
 class CacheMutex:
     """Places and manages a lock file on data in a raw directory, so that concurrent threads don't assume access to the
     same pickle files."""
@@ -91,6 +92,7 @@ class CacheMutex:
             sleep(1)
 
         # lock the mutex
+        os.makedirs(os.path.dirname(self.mutex_path), exist_ok=True)
         open(self.mutex_path, 'w').close()
 
     def __enter__(self):
@@ -116,7 +118,7 @@ def _assign_data(size, target_path):
     Raises:
         InsufficientSamplesError: if not enough unassigned samples are available.
     """
-    raw_path = os.path.dirname(target_path) + 'raw'
+    raw_path = os.path.join(os.path.dirname(target_path), 'raw')
 
     # iterate through the files in the raw directory until enough samples have been collected
     with CacheMutex(raw_path):
@@ -130,9 +132,17 @@ def _assign_data(size, target_path):
                 # get the next raw file
                 raw_file = os.path.join(raw_path, next(raw_files))
 
+                # don't try to read the mutex file as a pickle
+                if raw_file.endswith('cachemut.ex'):
+                    continue
+
                 # load it
-                with open(raw_file, 'rb') as infile:
-                    temp_X, temp_y = pickle.load(infile)
+                try:
+                    with open(raw_file, 'rb') as infile:
+                        temp_X, temp_y = pickle.load(infile)
+                except EOFError:
+                    print(raw_file)
+                    raise
 
                 enough = size - len(raw_X)
                 if len(temp_X) <= enough:
@@ -148,16 +158,21 @@ def _assign_data(size, target_path):
                     to_save = (raw_file, temp_X[enough:], temp_y[enough:])
         except StopIteration:
             # we ran out of files to load from. Good thing we didn't delete those files yet!
-            raise InsufficientSamplesError(size - len(raw_X), os.path.dirname(target_path))
+            print(target_path)
+            raise InsufficientSamplesError(size - len(raw_X), os.path.dirname(os.path.dirname(target_path)))
 
     # add collected samples to target set
-    with open(target_path, 'rb') as infile:
-        X, y = pickle.load(infile)
-    X.extend(raw_X[:size])
-    y.extend(raw_y[:size])
+    if os.path.isfile(os.path.join(target_path, 'none.pkl')):
+        with open(os.path.join(target_path, 'none.pkl'), 'rb') as infile:
+            X, y = pickle.load(infile)
+        X.extend(raw_X[:size])
+        y.extend(raw_y[:size])
+    else:
+        X = raw_X
+        y = raw_y
 
     # cache unprocessed dataset
-    with open(target_path, 'wb') as outfile:
+    with open(os.path.join(target_path, 'none.pkl'), 'wb') as outfile:
         pickle.dump((X, y), outfile)
 
     # delete marked files
@@ -191,10 +206,10 @@ def _load_dataset(size, unprocessed_path):
             return X[:size], y[:size]
 
         # move unassigned samples into the dataset, and return the dataset
-        return _assign_data(size - len(X), unprocessed_path)
+        return _assign_data(size - len(X), os.path.dirname(unprocessed_path))
 
     # no dataset created yet
-    return _assign_data(size, unprocessed_path)
+    return _assign_data(size, os.path.dirname(unprocessed_path))
 
 
 def _apply_preproc(preproc, batch_preproc, fn_name, X, y):
@@ -215,12 +230,17 @@ def _apply_preproc(preproc, batch_preproc, fn_name, X, y):
         if batch_preproc:
             X, y = preproc(X, y)
         else:
-            X, y = zip(*(preproc(x, wai) for x, wai in zip(X, y)))
+            try:
+                X, y = zip(*(preproc(x, wai) for x, wai in zip(X, y)))
+            except TypeError as e:
+                if str(e).startswith('zip argument #') and str(e).endswith(' must support iteration'):
+                    raise TypeError('preprocessor did not return the correct signature')
+                raise
         print(' done.')
     return list(X), list(y)
 
 
-def get_data(dataset, subset, size, params=None, preproc=None, batch_preproc=True):
+def get_data(dataset, subset, size, params=None, preproc=None, batch_preproc=True, redo_preproc=False):
     """Return the train, val, or test set from the specified dataset, preprocessed as requested.
 
     If batch_preproc is set, the preprocessor must accept a list of data points and a list of corresponding labels.
@@ -238,6 +258,8 @@ def get_data(dataset, subset, size, params=None, preproc=None, batch_preproc=Tru
                             all labels.
         batch_preproc (bool): if True, preproc is called on the entire dataset at once. Otherwise, preproc is called on
                               a single data point and label at a time.
+        redo_preproc (bool): if True, preproc is called on the dataset whether or not a cached, preprocessed version has
+                             already been created.
     Returns:
         list: data points, preprocessed as specified.
         list: labels corresponding to the data points.
@@ -277,16 +299,36 @@ def get_data(dataset, subset, size, params=None, preproc=None, batch_preproc=Tru
     os.makedirs(os.path.dirname(pickle_path), exist_ok=True)
 
     # try to load data from cache
-    if os.path.isfile(pickle_path):  # cache exists
+    if not pickle_path.endswith('none.pkl') and os.path.isfile(pickle_path) and not redo_preproc:
+        # preprocessed cache exists and we want to use it
         with open(pickle_path, 'rb') as infile:
-            return pickle.load(infile)
+            X, y = pickle.load(infile)
+            if len(X) >= size:
+                # if it's enough, return it
+                return X[:size], y[:size]
     else:
-        # get the unprocessed data either from cache or using _create_data
-        unprocessed_path = os.path.join(os.path.dirname(pickle_path), 'none.pkl')  # location of unprocessed dataset
-        X, y = _load_dataset(size, unprocessed_path)
-        # apply preprocessor
-        X, y = _apply_preproc(preproc, batch_preproc, fn_name, X, y)
-        # cache the preprocessed dataset
+        # there wasn't enough preprocessed data in the cache (or we aren't getting preprocessed data)
+        # so create empty containers for when we get the rest
+        X = []
+        y = []
+
+    # get the unprocessed data either from cache or using _create_data
+    unprocessed_path = os.path.join(os.path.dirname(pickle_path), 'none.pkl')  # location of unprocessed dataset
+    unproc_X, unproc_y = _load_dataset(size, unprocessed_path)
+
+    # X and y should be the beginning of unproc_X and unproc_y, so only preprocess the end
+    unproc_X = unproc_X[len(X):]
+    unproc_y = unproc_y[len(y):]
+
+    # apply preprocessor
+    unproc_X, unproc_y = _apply_preproc(preproc, batch_preproc, fn_name, unproc_X, unproc_y)
+
+    # add the newly preprocessed data to whatever we had before
+    X.extend(unproc_X)
+    y.extend(unproc_y)
+
+    # cache the preprocessed dataset
+    if not pickle_path.endswith('none.pkl'):
         with open(pickle_path, 'wb') as outfile:
             pickle.dump((X, y), outfile)
 

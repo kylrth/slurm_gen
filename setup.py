@@ -15,7 +15,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 setup(
     name='SLURM_gen',
 
-    version='0.1a1',
+    version='0.1a2',
 
     description=__doc__.split('\n')[0],
     long_description=long_description,
