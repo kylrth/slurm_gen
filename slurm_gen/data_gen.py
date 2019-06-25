@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
 
 SLURM_defaults = {
-    'mem-per-cpu': 16,
+    'mem-per-cpu': 8,
     'cpus-per-task': 1,
     'rhel7': True,
     'ntasks': 1,
