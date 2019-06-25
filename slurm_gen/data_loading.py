@@ -141,8 +141,9 @@ def _assign_data(size, target_path):
                     with open(raw_file, 'rb') as infile:
                         temp_X, temp_y = pickle.load(infile)
                 except EOFError:
-                    print(raw_file)
-                    raise
+                    # this file was not created correctly, so delete it
+                    os.remove(raw_file)
+                    continue
 
                 enough = size - len(raw_X)
                 if len(temp_X) <= enough:
@@ -163,8 +164,14 @@ def _assign_data(size, target_path):
 
     # add collected samples to target set
     if os.path.isfile(os.path.join(target_path, 'none.pkl')):
-        with open(os.path.join(target_path, 'none.pkl'), 'rb') as infile:
-            X, y = pickle.load(infile)
+        try:
+            with open(os.path.join(target_path, 'none.pkl'), 'rb') as infile:
+                X, y = pickle.load(infile)
+        except EOFError:
+            # the unprocessed set was not created correctly.
+            # It will be overwritten soon, so no need to delete
+            X = []
+            y = []
         X.extend(raw_X[:size])
         y.extend(raw_y[:size])
     else:
@@ -200,8 +207,14 @@ def _load_dataset(size, unprocessed_path):
     """
     # try to load unprocessed dataset from cache
     if os.path.isfile(unprocessed_path):  # unprocessed cache exists
-        with open(unprocessed_path, 'rb') as infile:
-            X, y = pickle.load(infile)
+        try:
+            with open(unprocessed_path, 'rb') as infile:
+                X, y = pickle.load(infile)
+        except EOFError:
+            # the unprocessed dataset file was not written correctly
+            os.remove(unprocessed_path)
+            X = []
+            y = []
         if size is None:
             return X, y
         if len(X) >= size:
@@ -307,13 +320,19 @@ def get_data(dataset, subset, size=None, params=None, preproc=None, batch_prepro
     # try to load data from cache
     if not pickle_path.endswith('none.pkl') and os.path.isfile(pickle_path) and not redo_preproc:
         # preprocessed cache exists and we want to use it
-        with open(pickle_path, 'rb') as infile:
-            X, y = pickle.load(infile)
-            if size is None:
-                return X, y
-            if len(X) >= size:
-                # if it's enough, return it
-                return X[:size], y[:size]
+        try:
+            with open(pickle_path, 'rb') as infile:
+                X, y = pickle.load(infile)
+        except EOFError:
+            # the cache was written bad and needs to be rewritten
+            os.remove(pickle_path)
+            X = []
+            y = []
+        if size is None:
+            return X, y
+        if len(X) >= size:
+            # if it's enough, return it
+            return X[:size], y[:size]
     else:
         # there wasn't enough preprocessed data in the cache (or we aren't getting preprocessed data)
         # so create empty containers for when we get the rest
