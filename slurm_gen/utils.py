@@ -11,6 +11,17 @@ from scipy.interpolate import interp1d
 import numpy as np
 
 
+def v_print(verbose, s):
+    """If verbose is True, print the string, prepending with the current timestamp.
+
+    Args:
+        verbose (bool): whether to print.
+        s (str): string to print. (This will be passed to str.format, so it could be anything with a __repr__.)
+    """
+    if verbose:
+        print('{}: ({}) {}'.format(time.time(), inspect.currentframe().f_back.f_code.co_name, s))
+
+
 def make_grid(xs, hs):
     """Creates a 2D grid with the density specified by xs and hs.
 
@@ -67,11 +78,11 @@ def get_func_name(func):
     Args:
         func (callable): function.
     Returns:
-        (str): name of function found using the inspect module.
+        (str): __name__ attribute of func, unless func is None then 'none'.
     """
     if func is None:
         return 'none'  # unprocessed version
-    return dict(inspect.getmembers(func))['__name__']
+    return func.__name__
 
 
 def sanitize_str(s):
