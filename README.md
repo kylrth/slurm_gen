@@ -73,6 +73,7 @@ The `@generator` decorator converts your function into a dataset generator which
 
 ## TODO
 
-- add example of parameter object for sine
-- allow datasets to be defined outside datasets.py
-- the generator decorator gets information from the docstring
+- When lots of raw samples are being assigned, `pickle` causes really big memory usage. Split pickling into smaller units.
+- Add example of parameter object for sine.
+- Allow datasets to be defined outside datasets.py.
+- Let the generator decorator get information from the docstring.
