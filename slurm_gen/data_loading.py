@@ -8,8 +8,6 @@ Kyle Roth. 2019-05-03.
 
 from glob import iglob as glob
 import os
-import pickle
-from time import sleep
 import warnings
 
 from slurm_gen import utils
@@ -17,15 +15,16 @@ from slurm_gen import utils
 
 class InsufficientSamplesError(Exception):
     """Helpful error messages for determining how much more time is needed to create the requested size of dataset."""
-    def __init__(self, size, dataset_path):
+    def __init__(self, size, dataset_path, verbose=False):
         """Use the size needed to determine how much compute time it will take to generate that many samples.
 
         Args:
             size (int): number of samples needed.
             dataset_path (str): path to the dataset. Should include params but not set name ('train', 'test').
+            verbose (bool): print debugging statements to stdout. Useful for development.
         """
         self.needed = size
-        times = self._get_times(dataset_path)
+        times = self._get_times(dataset_path, verbose)
         if times:
             est_time = self.s_to_clock(size * sum(times) / len(times))
             super(InsufficientSamplesError, self).__init__(
@@ -36,13 +35,14 @@ class InsufficientSamplesError(Exception):
                 '{} samples need to be generated; generate a small number first to estimate time'.format(size))
 
     @staticmethod
-    def _get_times(dp):
+    def _get_times(dp, verbose=False):
         """Get the recorded times for previous data generation.
 
         Also compile the times into a single file so it's faster next time.
 
         Args:
             dp (str): path to the dataset, including params but not the set name.
+            verbose (bool): print debugging statements to stdout. Useful for development.
         Returns:
             list(float): the collected times, in seconds.
         """
@@ -52,10 +52,12 @@ class InsufficientSamplesError(Exception):
             with open(fp, 'r') as infile:
                 times.extend(infile.read().strip().split())
             os.remove(fp)
+        utils.v_print(verbose, 'Collected {} timings from "{}".'.format(len(times), os.path.join(dp, '.times')))
 
         # store in a single file
         with open(os.path.join(dp, '.times', 'compiled.time'), 'w') as outfile:
             outfile.writelines([time + '\n' for time in times])
+        utils.v_print(verbose, 'Wrote timings to "{}"'.format(os.path.join(dp, '.times', 'compiled.time')))
 
         return [float(time) for time in times]
 
@@ -76,32 +78,80 @@ class InsufficientSamplesError(Exception):
         return '{}:{}:{}'.format(str(h).zfill(2), str(m).zfill(2), str(s).zfill(2))
 
 
-class CacheMutex:
-    """Places and manages a lock file on data in a raw directory, so that concurrent threads don't assume access to the
-    same pickle files."""
-    def __init__(self, locked_path):
-        """Ensure the path is available for locking, and lock it.
+def _collect_raw(raw_path, raw_files, size, verbose=False):
+    """Collect raw samples to be assigned by _assign_data.
 
-        Args:
-            locked_path (str): path to directory to lock.
-        """
-        self.mutex_path = os.path.join(locked_path, 'cachemut.ex')
+    Args:
+        raw_path (str): path to location of raw files.
+        raw_files (list(str)): list of raw files containing samples to collect.
+        size (int): number of samples to collect.
+        verbose (bool): print debugging statements to stdout. Useful for development.
+    Returns:
+        (list): features for raw samples collected from files.
+        (list): labels for raw samples collected from files.
+    """
+    raw_files = iter(raw_files)
+    raw_X = []
+    raw_y = []
+    to_delete = set()
+    to_save = False
 
-        # wait for mutex to be available
-        while os.path.isfile(self.mutex_path):
-            sleep(1)
+    try:
+        while len(raw_X) < size:
+            utils.v_print(verbose, 'Collected {}/{} samples so far.'.format(len(raw_X), size))
+            # get the next raw file
+            raw_file = os.path.join(raw_path, next(raw_files))
 
-        # lock the mutex
-        os.makedirs(os.path.dirname(self.mutex_path), exist_ok=True)
-        open(self.mutex_path, 'w').close()
+            # don't try to read the mutex file as a pickle
+            if raw_file.endswith('cachemut.ex'):
+                continue
 
-    def __enter__(self):
-        """Allow use with the Python `with` statement."""
-        return self
+            utils.v_print(verbose, 'Reading raw file "{}".'.format(raw_file))
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Release the mutex."""
-        os.remove(self.mutex_path)
+            # load it
+            try:
+                temp_X, temp_y = utils.from_pickle(raw_file)
+            except EOFError:
+                # this file was not created correctly, so delete it
+                utils.v_print(verbose, 'Raw file corrupt; deleting.')
+                os.remove(raw_file)
+                continue
+
+            enough = size - len(raw_X)
+            if len(temp_X) <= enough:
+                # add the whole thing and mark for deletion
+                raw_X.extend(temp_X)
+                raw_y.extend(temp_y)
+                to_delete.add(raw_file)
+                utils.v_print(
+                    verbose, 'Collected {} samples from raw file. Still need {} more.'.format(
+                        len(temp_X), enough - len(temp_X)))
+            else:
+                # only take the necessary samples
+                raw_X.extend(temp_X[:enough])
+                raw_y.extend(temp_y[:enough])
+                # save the rest
+                to_save = (raw_file, temp_X[enough:], temp_y[enough:])
+                utils.v_print(
+                    verbose, 'Collected {} samples from raw file, with {} left over.'.format(
+                        enough, len(to_save[1])))
+    except StopIteration:
+        # we ran out of files to load from. Good thing we didn't delete those files yet!
+        utils.v_print(verbose, 'Ran out of raw files before enough samples were found.')
+        raise InsufficientSamplesError(size - len(raw_X), os.path.dirname(raw_path))
+
+    # delete marked files
+    for raw_file in to_delete:
+        utils.v_print(verbose, 'Deleting raw file: "{}"'.format(raw_file))
+        os.remove(raw_file)
+
+    # if present, save leftovers
+    if to_save:
+        raw_file, temp_X_left, temp_y_left = to_save
+        utils.v_print(verbose, 'Saving {} leftover samples to "{}".'.format(len(temp_X_left), raw_file))
+        utils.to_pickle((temp_X_left, temp_y_left), raw_file)
+
+    return raw_X, raw_y
 
 
 def _assign_data(size, target_path, verbose=False):
@@ -123,67 +173,19 @@ def _assign_data(size, target_path, verbose=False):
     utils.v_print(verbose, 'Raw path: "{}"'.format(raw_path))
 
     # iterate through the files in the raw directory until enough samples have been collected
-    with CacheMutex(raw_path):
-        utils.v_print(verbose, 'Mutex obtained for raw path.')
+    utils.v_print(verbose, 'Mutex obtained for raw path.')
 
-        raw_files = os.listdir(raw_path)
-        utils.v_print(verbose, '{} raw files found.'.format(len(raw_files)))
-        raw_files = iter(raw_files)
-        raw_X = []
-        raw_y = []
-        to_delete = set()
-        to_save = False
-        try:
-            while len(raw_X) < size:
-                utils.v_print(verbose, 'Collected {}/{} samples so far.'.format(len(raw_X), size))
-                # get the next raw file
-                raw_file = os.path.join(raw_path, next(raw_files))
+    raw_files = os.listdir(raw_path)
+    utils.v_print(verbose, '{} raw files found.'.format(len(raw_files)))
 
-                # don't try to read the mutex file as a pickle
-                if raw_file.endswith('cachemut.ex'):
-                    continue
-
-                utils.v_print(verbose, 'Reading raw file "{}".'.format(raw_file))
-
-                # load it
-                try:
-                    with open(raw_file, 'rb') as infile:
-                        temp_X, temp_y = pickle.load(infile)
-                except EOFError:
-                    # this file was not created correctly, so delete it
-                    utils.v_print(verbose, 'Raw file corrupt; deleting.')
-                    os.remove(raw_file)
-                    continue
-
-                enough = size - len(raw_X)
-                if len(temp_X) <= enough:
-                    # add the whole thing and mark for deletion
-                    raw_X.extend(temp_X)
-                    raw_y.extend(temp_y)
-                    to_delete.add(raw_file)
-                    utils.v_print(
-                        verbose, 'Collected {} samples from raw file. Still need {} more.'.format(
-                            len(temp_X), enough - len(temp_X)))
-                else:
-                    # only take the necessary samples
-                    raw_X.extend(temp_X[:enough])
-                    raw_y.extend(temp_y[:enough])
-                    # save the rest
-                    to_save = (raw_file, temp_X[enough:], temp_y[enough:])
-                    utils.v_print(
-                        verbose, 'Collected {} samples from raw file, with {} left over.'.format(
-                            enough, len(to_save[1])))
-        except StopIteration:
-            # we ran out of files to load from. Good thing we didn't delete those files yet!
-            utils.v_print(verbose, 'Ran out of raw files before enough samples were found.')
-            raise InsufficientSamplesError(size - len(raw_X), os.path.dirname(raw_path))
+    # collect samples from the raw files, and raise an InsufficientSamplesError if there aren't enough samples
+    raw_X, raw_y = _collect_raw(raw_path, raw_files, size, verbose)
 
     # add collected samples to target set
     utils.v_print(verbose, 'Target path: "{}".'.format(target_path))
     if os.path.isfile(os.path.join(target_path, 'none.pkl')):
         try:
-            with open(os.path.join(target_path, 'none.pkl'), 'rb') as infile:
-                X, y = pickle.load(infile)
+            X, y = utils.from_pickle(os.path.join(target_path, 'none.pkl'))
             utils.v_print(verbose, 'Collected {} samples from target cache.'.format(len(X)))
         except EOFError:
             # the unprocessed set was not created correctly.
@@ -202,26 +204,13 @@ def _assign_data(size, target_path, verbose=False):
 
     # cache unprocessed dataset
     utils.v_print(verbose, 'Caching {} samples to target path.'.format(len(X)))
-    with open(os.path.join(target_path, 'none.pkl'), 'wb') as outfile:
-        pickle.dump((X, y), outfile)
-
-    # delete marked files
-    for raw_file in to_delete:
-        utils.v_print(verbose, 'Deleting raw file: "{}"'.format(raw_file))
-        os.remove(raw_file)
-
-    # if present, save leftovers
-    if to_save:
-        raw_file, temp_X_left, temp_y_left = to_save
-        utils.v_print(verbose, 'Saving {} leftover samples to "{}".'.format(len(temp_X_left), raw_file))
-        with open(raw_file, 'wb') as outfile:
-            pickle.dump((temp_X_left, temp_y_left), outfile)
+    utils.to_pickle((X, y), os.path.join(target_path, 'none.pkl'))
 
     utils.v_print(verbose, 'Returning {} samples.'.format(len(X)))
     return X, y
 
 
-def _load_dataset(size, unprocessed_path, verbose=False):
+def _load_unprocessed_dataset(size, unprocessed_path, verbose=False):
     """Load the unprocessed dataset from cache, including unassigned samples into the dataset if necessary.
 
     Args:
@@ -236,8 +225,7 @@ def _load_dataset(size, unprocessed_path, verbose=False):
     if os.path.isfile(unprocessed_path):  # unprocessed cache exists
         utils.v_print(verbose, 'Unprocessed cache found: "{}"'.format(unprocessed_path))
         try:
-            with open(unprocessed_path, 'rb') as infile:
-                X, y = pickle.load(infile)
+            X, y = utils.from_pickle(unprocessed_path)
             utils.v_print(verbose, 'Unprocessed cache successfully loaded.')
         except EOFError:
             # the unprocessed dataset file was not written correctly
@@ -273,13 +261,12 @@ def _load_dataset(size, unprocessed_path, verbose=False):
     return _assign_data(size, os.path.dirname(unprocessed_path), verbose)
 
 
-def _apply_preproc(preproc, batch_preproc, fn_name, X, y, verbose=False):
+def _apply_preproc(preproc, batch_preproc, X, y, verbose=False):
     """If available, apply the preprocessor to the dataset.
 
     Args:
         preproc (callable): Preprocessor function, with the call signature specified in the docstring for get_data.
         batch_preproc (bool): Whether to apply the preprocessor to the entire dataset or one point at a time.
-        fn_name (str): Name of the preprocessor function, as given by inspect.getmembers.
         X (iterable): points in the dataset.
         y (iterable): labels in the dataset.
         verbose (bool): print debugging statements to stdout. Useful for development.
@@ -288,7 +275,7 @@ def _apply_preproc(preproc, batch_preproc, fn_name, X, y, verbose=False):
         (list): preprocessed labels in the dataset.
     """
     if preproc:
-        utils.v_print(verbose, 'Applying preprocessor "{}".'.format(fn_name))
+        utils.v_print(verbose, 'Applying preprocessor "{}".'.format(preproc.__name__))
         if batch_preproc:
             utils.v_print(verbose, '    (using batch application)')
             X, y = preproc(X, y)
@@ -303,6 +290,93 @@ def _apply_preproc(preproc, batch_preproc, fn_name, X, y, verbose=False):
     else:
         utils.v_print(verbose, 'Preprocessor not run since none given.')
     return list(X), list(y)
+
+
+def _load_processed_dataset(dataset_dir, pickle_path, size, preproc, batch_preproc, redo_preproc, verbose=False):
+    """Load and return the processed dataset, processing more data if necessary.
+
+    Args:
+        dataset_dir (str): location of the dataset, determined by its name and the parameters.
+        pickle_path (str): path to the target pickle file. Should be dataset_dir plus the set name (e.g. 'train') plus
+                           the preprocessor name.
+        size (int): number of samples to get.
+        preproc (function): preprocessing function to apply to data.
+        batch_preproc (bool): if True, preproc is called on the entire dataset at once. Otherwise, preproc is called on
+                              a single data point and label at a time.
+        redo_preproc (bool): if True, preproc is called on the dataset whether or not a cached, preprocessed version has
+                             already been created.
+        verbose (bool): print debugging statements to stdout. Useful for development.
+    Returns:
+        (list): data points, preprocessed as specified.
+        (list): labels corresponding to the data points.
+    """
+    # wait until other get_data processes have finished using this dataset
+    with utils.CacheMutex(dataset_dir, verbose):
+        # try to load data from cache
+        if not pickle_path.endswith('none.pkl') and os.path.isfile(pickle_path) and not redo_preproc:
+            # preprocessed cache exists and we want to use it
+            utils.v_print(verbose, 'Preprocessed cache exists.')
+            try:
+                X, y = utils.from_pickle(pickle_path)
+            except EOFError:
+                # the cache was written bad and needs to be rewritten
+                utils.v_print(verbose, 'Cache file corrupt; deleting.')
+                os.remove(pickle_path)
+                X = []
+                y = []
+            if size is None:
+                utils.v_print(verbose, 'No size specified; returning (len(X), len(y)) == ({}, {}).'.format(len(X), len(y)))
+                return X, y
+            if len(X) >= size:
+                # if it's enough, return it
+                utils.v_print(
+                    verbose,
+                    'Size == {size} specified; returning first {size} of (len(X), len(y)) == ({x}, {y}).'.format(
+                        size=size,
+                        x=len(X),
+                        y=len(y)
+                    )
+                )
+                return X[:size], y[:size]
+            utils.v_print(verbose, 'Getting unprocessed dataset.')
+            utils.v_print(verbose, '    (cache size insufficient ({} < {}))'.format(len(X), size))
+        else:
+            # there wasn't enough preprocessed data in the cache (or we aren't getting preprocessed data)
+            # so create empty containers for when we get the rest
+            utils.v_print(
+                verbose and (pickle_path.endswith('none.pkl') or not os.path.isfile(pickle_path)),
+                'Getting unprocessed dataset.'
+            )
+            utils.v_print(verbose and redo_preproc, '    (redo_preproc set to True)')
+            X = []
+            y = []
+
+        # get the unprocessed data either from cache or using _create_data
+        unprocessed_path = os.path.join(os.path.dirname(pickle_path), 'none.pkl')  # location of unprocessed dataset
+        utils.v_print(verbose, 'Unprocessed path: "{}"'.format(unprocessed_path))
+        unproc_X, unproc_y = _load_unprocessed_dataset(size, unprocessed_path, verbose)
+
+        # X and y should be the beginning of unproc_X and unproc_y, so only preprocess the end
+        utils.v_print(verbose and X, 'Cutting first {} from the unprocessed dataset'.format(len(X)))
+        utils.v_print(verbose and X, '    (len cut from {} to {})'.format(len(unproc_X), len(unproc_X) - len(X)))
+        utils.v_print(verbose and X, '    (first {} already preprocessed)'.format(len(X)))
+        unproc_X = unproc_X[len(X):]
+        unproc_y = unproc_y[len(y):]
+
+        # apply preprocessor
+        unproc_X, unproc_y = _apply_preproc(preproc, batch_preproc, unproc_X, unproc_y, verbose)
+
+        # add the newly preprocessed data to whatever we had before
+        utils.v_print(verbose, 'Adding {} newly-preprocessed samples to set.'.format(len(unproc_X)))
+        X.extend(unproc_X)
+        y.extend(unproc_y)
+
+        # cache the preprocessed dataset
+        if not pickle_path.endswith('none.pkl'):
+            utils.v_print(verbose, 'Writing resulting preprocessed samples to cache: "{}".'.format(pickle_path))
+            utils.to_pickle((X, y), pickle_path)
+
+    return X, y
 
 
 def get_data(dataset, subset, size=None, params=None, preproc=None, batch_preproc=True, redo_preproc=False,
@@ -328,8 +402,8 @@ def get_data(dataset, subset, size=None, params=None, preproc=None, batch_prepro
                              already been created.
         verbose (bool): print debugging statements to stdout. Useful for development.
     Returns:
-        list: data points, preprocessed as specified.
-        list: labels corresponding to the data points.
+        (list): data points, preprocessed as specified.
+        (list): labels corresponding to the data points.
     Raises:
         InsufficientSamplesError: if there are insufficient samples to create the requested dataset.
     """
@@ -368,70 +442,4 @@ def get_data(dataset, subset, size=None, params=None, preproc=None, batch_prepro
     # ensure the directory for this set is available
     os.makedirs(os.path.dirname(pickle_path), exist_ok=True)
 
-    # try to load data from cache
-    if not pickle_path.endswith('none.pkl') and os.path.isfile(pickle_path) and not redo_preproc:
-        # preprocessed cache exists and we want to use it
-        utils.v_print(verbose, 'Preprocessed cache exists.')
-        try:
-            with open(pickle_path, 'rb') as infile:
-                X, y = pickle.load(infile)
-        except EOFError:
-            # the cache was written bad and needs to be rewritten
-            utils.v_print(verbose, 'Cache file corrupt; deleting.')
-            os.remove(pickle_path)
-            X = []
-            y = []
-        if size is None:
-            utils.v_print(verbose, 'No size specified; returning (len(X), len(y)) == ({}, {}).'.format(len(X), len(y)))
-            return X, y
-        if len(X) >= size:
-            # if it's enough, return it
-            utils.v_print(
-                verbose,
-                'Size == {size} specified; returning first {size} of (len(X), len(y)) == ({x}, {y}).'.format(
-                    size=size,
-                    x=len(X),
-                    y=len(y)
-                )
-            )
-            return X[:size], y[:size]
-        utils.v_print(verbose, 'Getting unprocessed dataset.')
-        utils.v_print(verbose, '    (cache size insufficient ({} < {}))'.format(len(X), size))
-    else:
-        # there wasn't enough preprocessed data in the cache (or we aren't getting preprocessed data)
-        # so create empty containers for when we get the rest
-        utils.v_print(
-            verbose and (pickle_path.endswith('none.pkl') or not os.path.isfile(pickle_path)),
-            'Getting unprocessed dataset.'
-        )
-        utils.v_print(verbose and redo_preproc, '    (redo_preproc set to True)')
-        X = []
-        y = []
-
-    # get the unprocessed data either from cache or using _create_data
-    unprocessed_path = os.path.join(os.path.dirname(pickle_path), 'none.pkl')  # location of unprocessed dataset
-    utils.v_print(verbose, 'Unprocessed path: "{}"'.format(unprocessed_path))
-    unproc_X, unproc_y = _load_dataset(size, unprocessed_path, verbose)
-
-    # X and y should be the beginning of unproc_X and unproc_y, so only preprocess the end
-    utils.v_print(verbose and X, 'Cutting first {} from the unprocessed dataset'.format(len(X)))
-    utils.v_print(verbose and X, '    (len cut from {} to {})'.format(len(unproc_X), len(unproc_X) - len(X)))
-    utils.v_print(verbose and X, '    (first {} already preprocessed)'.format(len(X)))
-    unproc_X = unproc_X[len(X):]
-    unproc_y = unproc_y[len(y):]
-
-    # apply preprocessor
-    unproc_X, unproc_y = _apply_preproc(preproc, batch_preproc, fn_name, unproc_X, unproc_y, verbose)
-
-    # add the newly preprocessed data to whatever we had before
-    utils.v_print(verbose, 'Adding {} newly-preprocessed samples to set.'.format(len(unproc_X)))
-    X.extend(unproc_X)
-    y.extend(unproc_y)
-
-    # cache the preprocessed dataset
-    if not pickle_path.endswith('none.pkl'):
-        utils.v_print(verbose, 'Writing resulting preprocessed samples to cache: "{}".'.format(pickle_path))
-        with open(pickle_path, 'wb') as outfile:
-            pickle.dump((X, y), outfile)
-
-    return X, y
+    return _load_processed_dataset(dataset_dir, pickle_path, size, preproc, batch_preproc, redo_preproc, verbose)

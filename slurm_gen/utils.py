@@ -5,6 +5,7 @@ Kyle Roth. 2019-05-17."""
 
 import inspect
 import os
+import pickle
 import time
 
 from scipy.interpolate import interp1d
@@ -20,6 +21,63 @@ def v_print(verbose, s):
     """
     if verbose:
         print('{}: ({}) {}'.format(time.time(), inspect.currentframe().f_back.f_code.co_name, s))
+
+
+def to_pickle(thing, filepath):
+    """Write the thing to a pickle file at the path specified.
+
+    Args:
+        thing: pickleable object.
+        filepath (str): path where file will be written.
+    """
+    with open(filepath, 'wb') as f:
+        pickle.dump(thing, f)
+
+
+def from_pickle(filepath):
+    """Load the thing from the pickle file at the path specified.
+
+    Args:
+        filepath (str): path where the pickle is located.
+    Returns:
+        : the object stored in the pickle.
+    """
+    with open(filepath, 'rb') as f:
+        return pickle.load(f)
+
+
+class CacheMutex:
+    """Places and manages a lock file on data in a raw directory, so that concurrent threads don't assume access to the
+    same pickle files."""
+    def __init__(self, locked_path, verbose=False):
+        """Ensure the path is available for locking, and lock it.
+
+        Args:
+            locked_path (str): path to directory to lock.
+            verbose (bool): whether to print debug statements.
+        """
+        self.mutex_path = os.path.join(locked_path, 'cachemut.ex')
+        self.verbose = verbose
+        v_print(self.verbose, 'Mutex path: "{}"'.format(self.mutex_path))
+
+    def __enter__(self):
+        """Wait for possession the mutex."""
+        # wait for mutex to be available
+        v_print(self.verbose, 'Awaiting mutex.')
+        while os.path.isfile(self.mutex_path):
+            time.sleep(1)
+
+        # lock the mutex
+        os.makedirs(os.path.dirname(self.mutex_path), exist_ok=True)
+        open(self.mutex_path, 'w').close()
+        v_print(self.verbose, 'Mutex locked.')
+
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Release the mutex."""
+        os.remove(self.mutex_path)
+        v_print(self.verbose, 'Mutex released.')
 
 
 def make_grid(xs, hs):
