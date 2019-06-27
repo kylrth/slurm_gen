@@ -20,7 +20,7 @@ def v_print(verbose, s):
         s (str): string to print. (This will be passed to str.format, so it could be anything with a __repr__.)
     """
     if verbose:
-        print('{}: ({}) {}'.format(time.time(), inspect.currentframe().f_back.f_code.co_name, s))
+        print('{:.6f}: ({}) {}'.format(time.time(), inspect.currentframe().f_back.f_code.co_name, s))
 
 
 def to_pickle(thing, filepath):
