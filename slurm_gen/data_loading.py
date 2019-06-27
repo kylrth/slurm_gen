@@ -81,6 +81,10 @@ class InsufficientSamplesError(Exception):
 def _collect_raw(raw_path, raw_files, size, verbose=False):
     """Collect raw samples to be assigned by _assign_data.
 
+    Instead of deleting the raw files, return the files marked for deletion. This allows _assign_data to create the
+    updated cache before deletion, avoiding the risk of the process being killed after deletion but before writing the
+    updated cache. Yay for not losing your data!
+
     Args:
         raw_path (str): path to location of raw files.
         raw_files (list(str)): list of raw files containing samples to collect.
@@ -89,6 +93,11 @@ def _collect_raw(raw_path, raw_files, size, verbose=False):
     Returns:
         (list): features for raw samples collected from files.
         (list): labels for raw samples collected from files.
+        (set(str)): set of raw files to be deleted.
+        (bool or tuple(str, list, list)): either False (meaning no leftovers need to be saved), or a tuple with:
+                                          - the path to the raw file where leftovers should be written,
+                                          - the raw features to be written,
+                                          - the raw labels to be written.
     """
     raw_files = iter(raw_files)
     raw_X = []
@@ -140,18 +149,7 @@ def _collect_raw(raw_path, raw_files, size, verbose=False):
         utils.v_print(verbose, 'Ran out of raw files before enough samples were found.')
         raise InsufficientSamplesError(size - len(raw_X), os.path.dirname(raw_path))
 
-    # delete marked files
-    for raw_file in to_delete:
-        utils.v_print(verbose, 'Deleting raw file: "{}"'.format(raw_file))
-        os.remove(raw_file)
-
-    # if present, save leftovers
-    if to_save:
-        raw_file, temp_X_left, temp_y_left = to_save
-        utils.v_print(verbose, 'Saving {} leftover samples to "{}".'.format(len(temp_X_left), raw_file))
-        utils.to_pickle((temp_X_left, temp_y_left), raw_file)
-
-    return raw_X, raw_y
+    return raw_X, raw_y, to_delete, to_save
 
 
 def _assign_data(size, target_path, verbose=False):
@@ -179,7 +177,7 @@ def _assign_data(size, target_path, verbose=False):
     utils.v_print(verbose, '{} raw files found.'.format(len(raw_files)))
 
     # collect samples from the raw files, and raise an InsufficientSamplesError if there aren't enough samples
-    raw_X, raw_y = _collect_raw(raw_path, raw_files, size, verbose)
+    raw_X, raw_y, to_delete, to_save = _collect_raw(raw_path, raw_files, size, verbose)
 
     # add collected samples to target set
     utils.v_print(verbose, 'Target path: "{}".'.format(target_path))
@@ -205,6 +203,21 @@ def _assign_data(size, target_path, verbose=False):
     # cache unprocessed dataset
     utils.v_print(verbose, 'Caching {} samples to target path.'.format(len(X)))
     utils.to_pickle((X, y), os.path.join(target_path, 'none.pkl'))
+
+    # we saved deletions and writing of leftovers until the assigned data was cached,
+    # just in case this process were killed
+
+    # delete marked files
+    for raw_file in to_delete:
+        utils.v_print(verbose, 'Deleting raw file: "{}"'.format(raw_file))
+        os.remove(raw_file)
+
+    # if present, save leftovers
+    if to_save:
+        raw_file, temp_X_left, temp_y_left = to_save
+        utils.v_print(verbose, 'Saving {} leftover samples to "{}".'.format(len(temp_X_left), raw_file))
+        utils.to_pickle((temp_X_left, temp_y_left), raw_file)
+
 
     utils.v_print(verbose, 'Returning {} samples.'.format(len(X)))
     return X, y
