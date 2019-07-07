@@ -60,7 +60,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{HOME}}/usr/lib/
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{HOME}}/usr/lib64/
 export PATH="${{HOME}}/usr/bin:$PATH"
 
-python3 -c "from time import time; from {}.datasets import {} as gen; gen({}, {})"
+python3 -u -c "from time import time; from {}.datasets import {} as gen; gen({}, {})"
 ' | sbatch --error="{}/%j.out" --output="{}/%j.out" --mem-per-cpu="{}GB" --cpus-per-task="{}" -J "{}" """ \
 """--ntasks="{}" --time="{}" """
 
