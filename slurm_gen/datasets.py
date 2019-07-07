@@ -99,36 +99,6 @@ def generator(cache_every=5):
     return decorator
 
 
-class WavelengthSweepParams(utils.PyModeParamObject):
-    """Attributes defining parameters to the wavelength_sweep experiment."""
-    # angle of incidence between waveguide side wall and substrate
-    sidewall_angle = 90
-
-    # dimensions of waveguide in microns
-    width = 0.5
-    thickness = 0.22
-
-    # dimensions of simulation in microns
-    xWidth = 5
-    yWidth = 3
-
-    # simulation resolution in the waveguide core
-    dcore = 20.01e-4
-
-    # simulation resolution in the cladding
-    dcladding = 20.01e-3
-
-    # number of modes to return
-    numModes = 1
-
-    # choice of minimum and maximum wavelength for sweep
-    wl_left = 1.45
-    wl_right = 1.65
-
-    # attribute to be updated at each sample
-    wavelength = None
-
-
 def _single_sim(params):
     """Perform a single simulation using the specified parameters.
 
@@ -214,6 +184,36 @@ def test__single_sim(**kwargs):
         plt.clf()
 
 
+class WavelengthSweepParams(utils.PyModeParamObject):
+    """Attributes defining parameters to the wavelength_sweep experiment."""
+    # angle of incidence between waveguide side wall and substrate
+    sidewall_angle = 90
+
+    # dimensions of waveguide in microns
+    width = 0.5
+    thickness = 0.22
+
+    # dimensions of simulation in microns
+    xWidth = 5
+    yWidth = 3
+
+    # simulation resolution in the waveguide core
+    dcore = 20.01e-4
+
+    # simulation resolution in the cladding
+    dcladding = 20.01e-3
+
+    # number of modes to return
+    numModes = 1
+
+    # choice of minimum and maximum wavelength for sweep
+    wl_left = 1.45
+    wl_right = 1.65
+
+    # attribute to be updated at each sample
+    wavelength = None
+
+
 @generator(2)
 def wavelength_sweep(size, params):
     """Return all six field profiles for a straight and square waveguide, varying wavelength and nothing else.
@@ -222,8 +222,8 @@ def wavelength_sweep(size, params):
         size (int): number of samples to create.
         params (dict): parameters to specify in place of the default values of the WavelengthSweepParams object.
     Yields:
-        (float): list of random wavelengths.
-        (np.ndarray): list of profile images.
+        (float): random wavelength.
+        (np.ndarray): profile images.
     """
     # set parameters of the experiment
     if params is None:
@@ -236,3 +236,63 @@ def wavelength_sweep(size, params):
         p.wavelength = wl
         fields = _single_sim(p)
         yield wl, fields
+
+
+class DimensionSweepParams(utils.PyModeParamObject):
+    """Attributes defining parameters to the dimension_sweep experiment."""
+    # angle of incidence between waveguide side wall and substrate
+    sidewall_angle = 90
+
+    # dimensions of waveguide in microns
+    width_left = 0.2
+    width_right = 0.7
+    thickness_left = 0.15
+    thickness_right = 0.5
+
+    # attribute to be updated at each sample
+    width = None
+    thickness = None
+
+    # dimensions of simulation in microns
+    xWidth = 5
+    yWidth = 3
+
+    # simulation resolution in the waveguide core
+    dcore = 20.01e-4
+
+    # simulation resolution in the cladding
+    dcladding = 20.01e-3
+
+    # number of modes to return
+    numModes = 1
+
+    # wavelength
+    wavelength = 1.55
+
+
+@generator(2)
+def dimension_sweep(size, params):
+    """Return all six field profiles for a straight and square waveguide, varying width and thickness.
+
+    Args:
+        size (int): number of samples to create.
+        params (dict): parameters to specify in place of the default values of the DimensionSweepParams object.
+    Yields:
+        (tuple(float, float)): random width and height.
+        (np.ndarray): profile images.
+    """
+    # set parameters of the experiment
+    if params is None:
+        p = DimensionSweepParams()
+    else:
+        # overwrite defaults using parameters passed in.
+        p = DimensionSweepParams(**params)
+
+    for width, thickness in zip(
+            np.random.uniform(p.width_left, p.width_right, size=size),  # pylint:disable=no-member
+            np.random.uniform(p.thickness_left, p.thickness_right, size=size)  # pylint:disable=no-member
+    ):
+        p.width = width
+        p.thickness = thickness
+        fields = _single_sim(p)
+        yield (width, thickness), fields
