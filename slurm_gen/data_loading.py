@@ -8,6 +8,7 @@ Kyle Roth. 2019-05-03.
 
 from glob import iglob as glob
 import os
+import pickle
 import warnings
 
 from slurm_gen import utils
@@ -120,7 +121,7 @@ def _collect_raw(raw_path, raw_files, size, verbose=False):
             # load it
             try:
                 temp_X, temp_y = utils.from_pickle(raw_file)
-            except EOFError:
+            except (EOFError, pickle.UnpicklingError):
                 # this file was not created correctly, so delete it
                 utils.v_print(verbose, 'Raw file corrupt; deleting.')
                 os.remove(raw_file)
