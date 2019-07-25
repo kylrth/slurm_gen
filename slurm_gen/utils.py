@@ -62,13 +62,14 @@ class CacheMutex:
 
     def __enter__(self):
         """Wait for possession the mutex."""
+        os.makedirs(os.path.dirname(self.mutex_path), exist_ok=True)
+
         # wait for mutex to be available
         v_print(self.verbose, 'Awaiting mutex.')
         while os.path.isfile(self.mutex_path):
             time.sleep(1)
 
         # lock the mutex
-        os.makedirs(os.path.dirname(self.mutex_path), exist_ok=True)
         open(self.mutex_path, 'w').close()
         v_print(self.verbose, 'Mutex locked.')
 
