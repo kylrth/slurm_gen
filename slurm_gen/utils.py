@@ -8,9 +8,6 @@ import os
 import pickle
 import time
 
-from scipy.interpolate import interp1d
-import numpy as np
-
 
 def v_print(verbose, s):
     """If verbose is True, print the string, prepending with the current timestamp.
@@ -81,27 +78,8 @@ class CacheMutex:
         v_print(self.verbose, 'Mutex released.')
 
 
-def make_grid(xs, hs):
-    """Creates a 2D grid with the density specified by xs and hs.
-
-    Used by pyMode for simulation points.
-
-    Args:
-        xs (array-like): positions at which to switch densities.
-        hs (array-like): densities to use between positions.
-    Returns:
-        (np.ndarray): linspace of points at the appropriate density for each section.
-    """
-    grid = [min(xs)]
-    interp = interp1d(xs, hs, kind='linear')
-    while grid[-1] < max(xs):
-        h = interp(grid[-1])
-        grid.append(grid[-1] + h)
-    return np.array(grid)
-
-
-class PyModeParamObject:
-    """Class with attributes specifying parameters for PyMode experiments. Not useful to instantiate on its own."""
+class DefaultParamObject:
+    """Class with attributes specifying default parameters for experiments. Not useful to instantiate on its own."""
     def __init__(self, **kwargs):
         """Replace any default values with those specified in the constructor call.
 
@@ -116,6 +94,22 @@ class PyModeParamObject:
                     set(kwargs.keys()) - set(self.__dict__)
                 ))
         self.__dict__.update(kwargs)
+
+    def to_string(self):
+        """Get a string representing the values of all the parameters.
+
+        This is used to create the directory for samples created with these parameters. Attributes beginning with an
+        underscore are not included.
+
+        Returns:
+            (str): the printable representation (repr) of each parameter, separated by pipe characters ("|").
+        """
+        out = ""
+        for attr in dir(self):
+            if not attr.startswith('_'):
+                out += '|' + repr(getattr(self, attr))
+
+        return out[1:]  # cut off first pipe character
 
 
 def dict_to_path(d):
@@ -155,6 +149,15 @@ def sanitize_str(s):
     return str(s).replace('"', '\\"')
 
 
+def get_cache_dir():
+    """Get the absolute path to the cache location.
+
+    Returns:
+        (str): the absolute path.
+    """
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cache')
+
+
 def get_dataset_dir(name, params):
     """Get the absolute path to the cache location for this specific dataset.
 
@@ -164,16 +167,27 @@ def get_dataset_dir(name, params):
         name (str): name of dataset.
         params (dict): parameters used by the generating function.
     """
-    cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cache')
-
     if params is None:
-        dataset_dir = os.path.join(cache_dir, name)
+        dataset_dir = os.path.join(get_cache_dir(), name)
     else:
-        dataset_dir = os.path.join(cache_dir, name, dict_to_path(params))
+        dataset_dir = os.path.join(get_cache_dir(), name, dict_to_path(params))
 
     os.makedirs(dataset_dir, exist_ok=True)
 
     return dataset_dir
+
+
+def get_SLURM_output_dir():
+    """Get the absolute path of the directory where data generation jobs should place their output.
+
+    From the directory of this module, this is the absolute path of ./slurm_output.
+
+    Returns:
+        (str): the absolute path.
+    """
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'slurm_output')
+    os.makedirs(out, exist_ok=True)
+    return out
 
 
 def get_unique_filename():
@@ -187,3 +201,83 @@ def get_unique_filename():
     if 'SLURM_JOBID' in os.environ:
         return os.environ['SLURM_JOBID']
     return str(time.time()).replace('.', '')
+
+
+def samples_to_jobs(size, njobs):
+    """Return a list of sample sizes for each job, by assigning as evenly as possible.
+
+    Args:
+        size (int): number of samples requested.
+        njobs (int): number of jobs to create.
+    Returns:
+        (list): list of length `njobs`, containing the number of samples for each job to generate.
+    """
+    even = size // njobs
+    out = [even] * njobs
+    for i in range(size - even * njobs):  # add remainder evenly at the front
+        out[i] += 1
+    return out
+
+
+def test_samples_to_jobs():
+    """Run simple test cases against samples_to_jobs."""
+    assert samples_to_jobs(100, 1) == [100]
+    assert samples_to_jobs(100, 2) == [50, 50]
+    assert samples_to_jobs(100, 3) == [34, 33, 33]
+    assert samples_to_jobs(101, 3) == [34, 34, 33]
+
+
+def _clock_to_seconds(s, val):
+    out = 0
+
+    for count in reversed(s.split(':')):
+        out += int(count) * val
+        val *= 60
+
+    return out
+
+
+def clock_to_seconds(s):
+    """Convert a time string (in one of the formats accepted by SLURM) to a number of seconds.
+
+    Acceptable time formats include "MM", "MM:SS", "HH:MM:SS", "D-HH", "D-HH:MM" and "D-HH:MM:SS".
+
+    Args:
+        s (str): time string.
+    Returns:
+        (int): the number of seconds.
+    """
+    try:
+        out = 0
+        days = None
+
+        # days
+        if '-' in s:
+            days, s = s.split('-')
+            out += int(days) * 86400
+
+            if len(s.split(':')) == 2:
+                # HH:MM
+                return out + _clock_to_seconds(s, 60)
+            if len(s.split(':')) == 1:
+                # HH
+                return out + int(s) * 3600
+
+        split = s.split(':')
+
+        if len(split) == 3:
+            # HH:MM:SS
+            return out + _clock_to_seconds(s, 1)
+
+        if len(split) == 2:
+            # MM:SS
+            return _clock_to_seconds(s, 1)
+
+        if len(split) == 1:
+            ## MM
+            return int(s) * 60
+
+        raise ValueError()
+    except ValueError:
+        raise ValueError('clock string has bad formatting: "{}"'.format(s))
+

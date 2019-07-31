@@ -15,7 +15,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 setup(
     name='SLURM_gen',
 
-    version='0.1a2',
+    version='0.1a3',
 
     description=__doc__.split('\n')[0],
     long_description=long_description,
@@ -40,7 +40,7 @@ setup(
 
     keywords='SLURM machine-learning data',
 
-    py_modules=['data_gen', 'data_loading', 'datasets', 'utils'],
+    py_modules=['generate', 'data_loading', 'datasets', 'utils'],
 
     install_requires=['numpy', 'matplotlib', 'scipy', 'pyMode'],
 

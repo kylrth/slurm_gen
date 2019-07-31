@@ -15,14 +15,16 @@ from time import time
 
 from matplotlib import pyplot as plt
 import numpy as np
+from scipy.interpolate import interp1d
 
 import pyMode as pm
 from pyMode.materials import Si, SiO2
 
-from . import utils
+from slurm_gen import utils
 
 
-def generator(cache_every=5):
+
+def generator(cache_every):
     """Create a decorator that turns a data generating function into one that stores data in the raw cache, caching
     every cache_every data points.
 
@@ -99,6 +101,25 @@ def generator(cache_every=5):
     return decorator
 
 
+def make_grid(xs, hs):
+    """Creates a 2D grid with the density specified by xs and hs.
+
+    Used by pyMode for simulation points.
+
+    Args:
+        xs (array-like): positions at which to switch densities.
+        hs (array-like): densities to use between positions.
+    Returns:
+        (np.ndarray): linspace of points at the appropriate density for each section.
+    """
+    grid = [min(xs)]
+    interp = interp1d(xs, hs, kind='linear')
+    while grid[-1] < max(xs):
+        h = interp(grid[-1])
+        grid.append(grid[-1] + h)
+    return np.array(grid)
+
+
 def _single_sim(params):
     """Perform a single simulation using the specified parameters.
 
@@ -140,11 +161,11 @@ def _single_sim(params):
     # Set up the simulation grid
     xLocs = [0, bottomFace / 2, bottomFace / 2 + 0.1, params.xWidth / 2]
     xVals = [params.dcore, params.dcore, params.dcladding, params.dcladding]
-    xx = utils.make_grid(xLocs, xVals)
+    xx = make_grid(xLocs, xVals)
 
     yLocs = [0, params.thickness / 2, params.thickness / 2 + 0.1, params.yWidth / 2]
     yVals = [params.dcore, params.dcore, params.dcladding, params.dcladding]
-    yy = utils.make_grid(yLocs, yVals)
+    yy = make_grid(yLocs, yVals)
     yy = np.concatenate((-(np.flip(yy[1:-1], 0)), yy))
 
     # Run the simulation
@@ -184,7 +205,7 @@ def test__single_sim(**kwargs):
         plt.clf()
 
 
-class WavelengthSweepParams(utils.PyModeParamObject):
+class WavelengthSweepParams(utils.DefaultParamObject):
     """Attributes defining parameters to the wavelength_sweep experiment."""
     # angle of incidence between waveguide side wall and substrate
     sidewall_angle = 90
@@ -238,7 +259,7 @@ def wavelength_sweep(size, params):
         yield wl, fields
 
 
-class DimensionSweepParams(utils.PyModeParamObject):
+class DimensionSweepParams(utils.DefaultParamObject):
     """Attributes defining parameters to the dimension_sweep experiment."""
     # angle of incidence between waveguide side wall and substrate
     sidewall_angle = 90
