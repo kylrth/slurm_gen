@@ -23,13 +23,16 @@ from pyMode.materials import Si, SiO2
 from slurm_gen import utils
 
 
-
-def generator(cache_every):
+def generator(cache_every, ParamClass):
     """Create a decorator that turns a data generating function into one that stores data in the raw cache, caching
     every cache_every data points.
 
     Args:
         cache_every (int): number of data points to load between caching.
+        ParamClass (class): class name of the parameter object that the function accepts. Must have a to_string() method
+                            that creates a string of the parameter values, and a constructor that creates a new object
+                            from a dict of params that override defaults. It suffices to be a subclass of
+                            utils.DefaultParamObject.
     Returns:
         (decorator): decorator for a generating function that creates the caching function as described.
     """
@@ -52,6 +55,9 @@ def generator(cache_every):
                 size (int): number of samples to create.
                 params (dict): parameters to pass to generating function.
             """
+            # convert to the parameter class
+            params = ParamClass(**params)
+
             # cache it in the raw location
             dataset_dir = utils.get_dataset_dir(fn_name, params)
             raw_path = os.path.join(
@@ -95,6 +101,9 @@ def generator(cache_every):
 
                     # record the time spent
                     time_f.write(str(time() - start) + '\n')
+
+        # store the class used by this function, for use in data_loading.get_data
+        wrapper.paramClass = ParamClass
 
         return wrapper
 
@@ -231,31 +240,21 @@ class WavelengthSweepParams(utils.DefaultParamObject):
     wl_left = 1.45
     wl_right = 1.65
 
-    # attribute to be updated at each sample
-    wavelength = None
 
-
-@generator(2)
+@generator(2, WavelengthSweepParams)
 def wavelength_sweep(size, params):
     """Return all six field profiles for a straight and square waveguide, varying wavelength and nothing else.
 
     Args:
         size (int): number of samples to create.
-        params (dict): parameters to specify in place of the default values of the WavelengthSweepParams object.
+        params (WavelengthSweepParams): parameters to the experiment.
     Yields:
         (float): random wavelength.
         (np.ndarray): profile images.
     """
-    # set parameters of the experiment
-    if params is None:
-        p = WavelengthSweepParams()
-    else:
-        # overwrite defaults using parameters passed in.
-        p = WavelengthSweepParams(**params)
-
-    for wl in np.random.uniform(p.wl_left, p.wl_right, size=size):  # pylint:disable=no-member
-        p.wavelength = wl
-        fields = _single_sim(p)
+    for wl in np.random.uniform(params.wl_left, params.wl_right, size=size):  # pylint:disable=no-member
+        params.wavelength = wl
+        fields = _single_sim(params)
         yield wl, fields
 
 
@@ -269,10 +268,6 @@ class DimensionSweepParams(utils.DefaultParamObject):
     width_right = 0.7
     thickness_left = 0.15
     thickness_right = 0.5
-
-    # attribute to be updated at each sample
-    width = None
-    thickness = None
 
     # dimensions of simulation in microns
     xWidth = 5
@@ -291,29 +286,22 @@ class DimensionSweepParams(utils.DefaultParamObject):
     wavelength = 1.55
 
 
-@generator(2)
+@generator(2, DimensionSweepParams)
 def dimension_sweep(size, params):
     """Return all six field profiles for a straight and square waveguide, varying width and thickness.
 
     Args:
         size (int): number of samples to create.
-        params (dict): parameters to specify in place of the default values of the DimensionSweepParams object.
+        params (DimensionSweepParams): parameters to the experiment.
     Yields:
         (tuple(float, float)): random width and height.
         (np.ndarray): profile images.
     """
-    # set parameters of the experiment
-    if params is None:
-        p = DimensionSweepParams()
-    else:
-        # overwrite defaults using parameters passed in.
-        p = DimensionSweepParams(**params)
-
     for width, thickness in zip(
-            np.random.uniform(p.width_left, p.width_right, size=size),  # pylint:disable=no-member
-            np.random.uniform(p.thickness_left, p.thickness_right, size=size)  # pylint:disable=no-member
+            np.random.uniform(params.width_left, params.width_right, size=size),  # pylint:disable=no-member
+            np.random.uniform(params.thickness_left, params.thickness_right, size=size)  # pylint:disable=no-member
     ):
-        p.width = width
-        p.thickness = thickness
-        fields = _single_sim(p)
+        params.width = width
+        params.thickness = thickness
+        fields = _single_sim(params)
         yield (width, thickness), fields

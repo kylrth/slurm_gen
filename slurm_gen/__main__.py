@@ -89,8 +89,9 @@ def get_counts(dataset):
 
     for params in os.listdir(dataset_dir):
         out[params] = {}
-        for set_name in ('raw', 'train', 'val', 'test'):
-            out[params][set_name] = get_count(os.path.join(dataset_dir, params, set_name))
+        for set_name in os.listdir(os.path.join(dataset_dir, params)):
+            if not set_name.startswith('.'):  # don't grab things like '.times'
+                out[params][set_name] = get_count(os.path.join(dataset_dir, params, set_name))
 
     return out
 
@@ -116,6 +117,8 @@ def _list():
 
 def _move(p):
     """Move unlabeled samples into a particular set."""
+    # TODO: don't allow moving to 'train+val', but allow everything else
+    # TODO: don't move out of 'test'
 
 
 def main(p):

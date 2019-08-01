@@ -31,51 +31,27 @@ def to_pickle(thing, filepath):
         pickle.dump(thing, f)
 
 
-def from_pickle(filepath):
+def from_pickle(filepath, verbose=False):
     """Load the thing from the pickle file at the path specified.
+
+    Errors while reading the pickle result in deleting the file. It's better to remove the file and try to recover than
+    to raise an exception simply because a data run resulted in a corrupted file.
 
     Args:
         filepath (str): path where the pickle is located.
+        verbose (bool): whether to print debug statements.
     Returns:
-        : the object stored in the pickle.
+        : the object stored in the pickle, or ([], []) if the read was unsuccessful.
     """
-    with open(filepath, 'rb') as f:
-        return pickle.load(f)
-
-
-class CacheMutex:
-    """Places and manages a lock file on data in a raw directory, so that concurrent threads don't assume access to the
-    same pickle files."""
-    def __init__(self, locked_path, verbose=False):
-        """Ensure the path is available for locking, and lock it.
-
-        Args:
-            locked_path (str): path to directory to lock.
-            verbose (bool): whether to print debug statements.
-        """
-        self.mutex_path = os.path.join(locked_path, 'cachemut.ex')
-        self.verbose = verbose
-        v_print(self.verbose, 'Mutex path: "{}"'.format(self.mutex_path))
-
-    def __enter__(self):
-        """Wait for possession the mutex."""
-        os.makedirs(os.path.dirname(self.mutex_path), exist_ok=True)
-
-        # wait for mutex to be available
-        v_print(self.verbose, 'Awaiting mutex.')
-        while os.path.isfile(self.mutex_path):
-            time.sleep(1)
-
-        # lock the mutex
-        open(self.mutex_path, 'w').close()
-        v_print(self.verbose, 'Mutex locked.')
-
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Release the mutex."""
-        os.remove(self.mutex_path)
-        v_print(self.verbose, 'Mutex released.')
+    try:
+        with open(filepath, 'rb') as f:
+            out = pickle.load(f)
+        v_print(verbose, 'Cache file successfully loaded.')
+        return out
+    except (EOFError, pickle.UnpicklingError):
+        v_print(verbose, 'Cache file corrupt; deleting.')
+        os.remove(filepath)
+        return [], []
 
 
 class DefaultParamObject:
@@ -110,17 +86,6 @@ class DefaultParamObject:
                 out += '|' + repr(getattr(self, attr))
 
         return out[1:]  # cut off first pipe character
-
-
-def dict_to_path(d):
-    """Create a string of the values of the dictionary, separated by dashes.
-
-    Args:
-        d (dict).
-    Returns:
-        (str): The dictionary's values separated by dashes.
-    """
-    return '-'.join(str(val) for val in d.values())
 
 
 def get_func_name(func):
@@ -161,20 +126,11 @@ def get_cache_dir():
 def get_dataset_dir(name, params):
     """Get the absolute path to the cache location for this specific dataset.
 
-    The dataset directory is created if it does not exist.
-
     Args:
         name (str): name of dataset.
-        params (dict): parameters used by the generating function.
+        params: an object with a to_string() method, containing parameters used by the generating function.
     """
-    if params is None:
-        dataset_dir = os.path.join(get_cache_dir(), name)
-    else:
-        dataset_dir = os.path.join(get_cache_dir(), name, dict_to_path(params))
-
-    os.makedirs(dataset_dir, exist_ok=True)
-
-    return dataset_dir
+    return os.path.join(get_cache_dir(), name, params.to_string())
 
 
 def get_SLURM_output_dir():
@@ -185,9 +141,7 @@ def get_SLURM_output_dir():
     Returns:
         (str): the absolute path.
     """
-    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'slurm_output')
-    os.makedirs(out, exist_ok=True)
-    return out
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'slurm_output')
 
 
 def get_unique_filename():
@@ -228,6 +182,14 @@ def test_samples_to_jobs():
 
 
 def _clock_to_seconds(s, val):
+    """Helper function for clock_to_seconds.
+
+    Args:
+        s (str): substring containing values separated by colons.
+        val (int): initial time multiplier, which is multiplied by 60 after each iteration.
+    Returns:
+        (int): computed time value.
+    """
     out = 0
 
     for count in reversed(s.split(':')):
