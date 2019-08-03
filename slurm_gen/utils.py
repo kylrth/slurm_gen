@@ -280,6 +280,8 @@ def get_count(path, verbose=False):
                 return out
 
     # count the samples in the pkl files by hand
+    print('No metadata is present for the dataset at {}'.format(path))
+    print('We\'ll have to count by hand. This may take a long time, depending on the number of samples.')
     v_print(verbose, 'Counting by hand')
     if path.endswith('raw'):
         count = 0
