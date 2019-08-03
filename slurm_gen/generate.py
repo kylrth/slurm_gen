@@ -31,7 +31,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{HOME}}/usr/lib/
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{HOME}}/usr/lib64/
 export PATH="${{HOME}}/usr/bin:$PATH"
 
-python3 -u -c "from time import time; from {this_module}.datasets import {dataset} as gen; gen({size}, {params})"
+python3 -u -c "from {this_module}.datasets import {dataset} as gen; gen({size}, {params})"
 ' | sbatch --error="{out}/%j.out" --output="{out}/%j.out" --mem-per-cpu="{mem}" --cpus-per-task="{cpus}" """ \
 """-J "{name}" --ntasks="{ntasks}" --time="{time}" """
 
@@ -67,7 +67,7 @@ def create_SLURM_command(dataset, size, params, SLURM_out, options):
         this_module=os.path.basename(os.path.dirname(os.path.abspath(__file__))),  # should be 'slurm_gen'
         dataset=utils.sanitize_str(dataset),
         size=utils.sanitize_str(size),
-        params=utils.sanitize_str(params),
+        params=utils.sanitize_str(repr(params)),
         out=utils.sanitize_str(SLURM_out),
         mem=utils.sanitize_str(options.mem_per_cpu),
         cpus=utils.sanitize_str(options.cpus_per_task),
@@ -97,7 +97,7 @@ def create_SLURM_command(dataset, size, params, SLURM_out, options):
     return command
 
 
-def generate_data(dataset, size, params, options=None, njobs=1, verbose=False):
+def generate_data(dataset, size, params, options, njobs=1, verbose=False):
     """Using SLURM, generate `size` samples of the dataset, using the generation function defined in datasets.py.
 
     Args:
@@ -156,15 +156,14 @@ if __name__ == '__main__':
         '-l', '--at_least', action='store_true',
         help='simply ensure that n data points are present, generating more if necessary')
     parser.add_argument(
-        '-p', '--params', type=str,
+        '-p', '--params', type=str, default={},
         help='dict to be passed as params to the data generator. Use --describe to view the docstring for the '
         'generating function, which may describe possible keys and values for params.')
-    parser.add_argument('--test', action='store_true', help='mark SLURM submissions with "--qos=test"')
     parser.add_argument(
         '-t', '--time', type=str,
         help='time for each job to run. Acceptable time formats include "MM", "MM:SS", "HH:MM:SS", "D-HH", "D-HH:MM" '
-        'and "D-HH:MM:SS". If None, the third standard deviation above the mean of previous runs is used (adapted to '
-        'the number of samples per job).')
+        'and "D-HH:MM:SS". If not provided, the third standard deviation above the mean of previous runs is used '
+        '(adapted to the number of samples per job).')
     parser.add_argument('--cpus_per_task', type=int, default=1, help='number of CPUs per SLURM task')
     parser.add_argument('--name', type=str, default='data gen', help='name for each SLURM task')
     parser.add_argument('--ntasks', type=int, default=1, help='number of tasks to assign to this job')

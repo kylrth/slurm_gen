@@ -71,19 +71,19 @@ class DefaultParamObject:
                 ))
         self.__dict__.update(kwargs)
 
-    def to_string(self):
+    def _to_string(self):
         """Get a string representing the values of all the parameters.
 
         This is used to create the directory for samples created with these parameters. Attributes beginning with an
         underscore are not included.
 
         Returns:
-            (str): the printable representation (repr) of each parameter, separated by pipe characters ("|").
+            (str): each parameter's name and value, separated by pipe characters ("|").
         """
         out = ""
         for attr in dir(self):
             if not attr.startswith('_'):
-                out += '|' + repr(getattr(self, attr))
+                out += '|' + attr + repr(getattr(self, attr))
 
         return out[1:]  # cut off first pipe character
 
@@ -128,9 +128,9 @@ def get_dataset_dir(name, params):
 
     Args:
         name (str): name of dataset.
-        params: an object with a to_string() method, containing parameters used by the generating function.
+        params: an object with a _to_string() method, containing parameters used by the generating function.
     """
-    return os.path.join(get_cache_dir(), name, params.to_string())
+    return os.path.join(get_cache_dir(), name, params._to_string())
 
 
 def get_SLURM_output_dir():
@@ -243,3 +243,109 @@ def clock_to_seconds(s):
     except ValueError:
         raise ValueError('clock string has bad formatting: "{}"'.format(s))
 
+
+def get_count(path, verbose=False):
+    """Get the quantity of data samples available at the dataset path.
+
+    Looks for a metadata file named '.metadata', which should contain the size. If not, it collects the pickle files and
+    determines the size.
+
+    If the path is to a 'raw' set of samples, just the number of samples is returned. Otherwise, a dict mapping
+    preprocessor names to numbers of samples is returned.
+
+    Args:
+        path (str): path to directory.
+        verbose (bool): whether to print debug statements.
+    Returns:
+        (int or dict): number of samples.
+    """
+    # check to see if the .metadata file contains the size
+    v_print(verbose, 'Getting count for directory "{}"'.format(path))
+    if os.path.isfile(os.path.join(path, '.metadata')):
+        v_print(verbose, 'Using metadata file')
+        with open(os.path.join(path, '.metadata'), 'r') as metadata:
+            if path.endswith('raw'):
+                for line in metadata:
+                    if line.startswith('size: '):
+                        # for raw, there is no preprocessing, so only a number is desired
+                        out = int(line.split(': ')[1])
+                        v_print(verbose, 'Found raw size {}'.format(out))
+                        return out
+            else:
+                out = {}
+                for line in metadata:
+                    if line.startswith('size "'):
+                        out[line.split('"')[1]] = int(line.split(': ')[1])
+                v_print(verbose, 'Found sizes: {}'.format(out))
+                return out
+
+    # count the samples in the pkl files by hand
+    v_print(verbose, 'Counting by hand')
+    if path.endswith('raw'):
+        count = 0
+        for file in os.listdir(path):
+            if file.endswith('.pkl'):
+                v_print(verbose, 'Adding count from file "{}"'.format(file))
+                count += len(from_pickle(os.path.join(path, file))[1])
+                v_print(verbose, 'Count is now {}'.format(count))
+
+        # save the count for next time
+        v_print(verbose, 'Writing count to "{}"'.format(os.path.join(path, '.metadata')))
+        with open(os.path.join(path, '.metadata'), 'w+') as metadata:
+            metadata.write('size: {}\n'.format(count))
+    else:
+        count = {}
+        for file in os.listdir(path):
+            if file.endswith('.pkl'):
+                v_print(verbose, 'Adding count from file "{}"'.format(file))
+                count[file[:-4]] = len(from_pickle(os.path.join(path, file))[1])
+                v_print(verbose, 'Count is now {}'.format(count))
+
+        # save the count for next time
+        v_print(verbose, 'Writing count to "{}"'.format(os.path.join(path, '.metadata')))
+        with open(os.path.join(path, '.metadata'), 'w+') as metadata:
+            for set_name in count:
+                metadata.write('size "{}": {}\n'.format(set_name, count[set_name]))
+
+    return count
+
+
+def get_counts(dataset, verbose=False):
+    """Get detailed quantity information for a dataset.
+
+    A possible return dict could look like the following:
+
+    {
+        'some|param|options': {
+            'raw': 500,
+            'train': {'some_preprocessor': 1000, None: 1000},
+            'val': {None: 500},
+            'test': {None: 500}
+        },
+        'other|param|options': {
+            'raw': 2000,
+            'train': {},
+            'val': {},
+            'test': {}
+        }
+    }
+
+    Args:
+        dataset (str): name of dataset.
+        verbose (bool): whether to print debug statements.
+    Returns:
+        (dict): a map from subset strings to counts, at the necessary depths.
+    """
+    dataset_dir = os.path.join(get_cache_dir(), dataset)
+    v_print(verbose, 'Dataset directory: "{}"'.format(dataset_dir))
+    out = {}
+
+    for params in os.listdir(dataset_dir):
+        out[params] = {}
+        v_print(verbose, 'Params: {}'.format(params))
+        for set_name in os.listdir(os.path.join(dataset_dir, params)):
+            if not set_name.startswith('.'):  # don't grab things like '.times'
+                v_print(verbose, 'Set name: {}'.format(set_name))
+                out[params][set_name] = get_count(os.path.join(dataset_dir, params, set_name), verbose)
+
+    return out

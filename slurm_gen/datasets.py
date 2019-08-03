@@ -29,9 +29,9 @@ def generator(cache_every, ParamClass):
 
     Args:
         cache_every (int): number of data points to load between caching.
-        ParamClass (class): class name of the parameter object that the function accepts. Must have a to_string() method
-                            that creates a string of the parameter values, and a constructor that creates a new object
-                            from a dict of params that override defaults. It suffices to be a subclass of
+        ParamClass (class): class name of the parameter object that the function accepts. Must have a _to_string()
+                            method that creates a string of the parameter values, and a constructor that creates a new
+                            object from a dict of params that override defaults. It suffices to be a subclass of
                             utils.DefaultParamObject.
     Returns:
         (decorator): decorator for a generating function that creates the caching function as described.
@@ -64,6 +64,7 @@ def generator(cache_every, ParamClass):
                 dataset_dir,
                 'raw/{}_{{}}.pkl'.format(utils.get_unique_filename())
             )
+            print('Output path:', raw_path)
             os.makedirs(os.path.dirname(raw_path), exist_ok=True)
 
             iter_data = f(size, params)

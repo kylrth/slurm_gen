@@ -290,12 +290,10 @@ def _apply_preproc(preproc, batch_preproc, X, y, verbose=False):
     return list(X), list(y)
 
 
-#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-def _load_processed_dataset(dataset_dir, pickle_path, size, preproc, batch_preproc, redo_preproc, verbose=False):
+def _load_processed_dataset(pickle_path, size, preproc, batch_preproc, redo_preproc, verbose=False):
     """Load and return the processed dataset, processing more data if necessary.
 
     Args:
-        dataset_dir (str): location of the dataset, determined by its name and the parameters.
         pickle_path (str): path to the target pickle file. Should be dataset_dir plus the set name (e.g. 'train') plus
                            the preprocessor name.
         size (int): number of samples to get.
