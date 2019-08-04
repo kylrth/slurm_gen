@@ -95,7 +95,7 @@ def _list(p):
     Args:
         p (argparse.Namespace): namespace object containing the attributes specified below in the parser definition.
     """
-    if p.first_arg is None:
+    if p.dataset is None:
         # get all of them!
         divider = '-' * 80 + '\n'
         did_print = False
@@ -114,19 +114,54 @@ def _list(p):
     else:
         # get just the one dataset
         try:
-            single_list(p.first_arg.lower(), p.verbose)
+            single_list(p.dataset.lower(), p.verbose)
         except FileNotFoundError:
-            print('No dataset found by name {}'.format(p.first_arg.lower()))
+            print('No dataset found by name {}'.format(p.dataset.lower()))
 
 
 def _move(p):
-    """Move unlabeled samples into a particular set.
+    """Move samples between sets, confirming the choice before doing so.
 
     Args:
         p (argparse.Namespace): namespace object containing the attributes specified below in the parser definition.
     """
-    # TODO: don't allow moving to 'train+val', but allow everything else
-    # TODO: don't move out of 'test'
+    if p.to_set.lower() == 'train+val':
+        raise ValueError('the name "train+val" is reserved for combining the "train" and "val" sets')
+    if p.from_set.lower() == 'test':
+        raise ValueError('once samples have been added to "test", they cannot be removed')
+
+    cache_dir = utils.get_cache_dir()
+    dataset_dir = os.path.join(cache_dir, p.dataset)
+
+    # get the param set from the param number
+    try:
+        param_set = list(sorted(par for par in os.listdir(dataset_dir) if not par.startswith('.')))[p.param_num - 1]
+    except FileNotFoundError:
+        raise ValueError('dataset "{}" does not exist'.format(p.dataset))
+    except IndexError:
+        raise ValueError('param set number {} does not exist'.format(p.param_num))
+
+    from_dir = os.path.join(dataset_dir, param_set, p.from_set.lower())
+    to_dir = os.path.join(dataset_dir, param_set, p.to_set.lower())
+
+    from_count = utils.get_count(from_dir, p.verbose)
+    to_count = utils.get_count(to_dir, p.verbose)  # TODO: handle dicts with preprocessed counts
+
+    if from_count < p.n_samples:
+        raise ValueError('{} only has {} samples'.format(from_dir[len(cache_dir):], from_count))
+
+    # ask confirmation
+    print('Move {} samples from {} to {}?'.format(p.n_samples, from_dir[len(cache_dir):], to_dir[len(cache_dir):]))
+    print(
+        'This would result in sizes {} and {}, respectively.'.format(from_count - p.n_samples, to_count + p.n_samples),
+        end=''
+    )
+    confirm = input(' (y/N): ')
+    if confirm.lower() not in {'y', 'yes'}:
+        print('Aborting')
+        return
+
+    # TODO: perform move
     # TODO: update counts
 
 
@@ -150,9 +185,32 @@ if __name__ == '__main__':
 
     # required arguments
     parser.add_argument('command', help='command to perform. One of {"list", "move"}.')
-    parser.add_argument(
-        'first_arg', nargs='?',
-        help='Argument to the command. If the command is "list", this is the dataset to list counts for.')
+    parser.add_argument('dataset', nargs='?', help='Dataset to perform the list or move command on.')
+    parser.add_argument('-p', '--param_num', type=int, help='Param set number given by the list command.')
+    parser.add_argument('-f', '--from_set', help='Subset of the dataset from which to move samples.')
+    parser.add_argument('-t', '--to_set', help='Subset of the dataset to which to move samples.')
+    parser.add_argument('-n', '--n_samples', type=int, help='Number of samples to move.')
     parser.add_argument('-v', '--verbose', action='store_true', help='print debug info while running the command.')
 
-    main(parser.parse_args())
+    args = parser.parse_args()
+
+    if args.command == 'list':
+        if args.param_num is not None:
+            raise ValueError('--param_num must not be set for the "list" command')
+        if args.from_set is not None:
+            raise ValueError('--from_set must not be set for the "list" command')
+        if args.to_set is not None:
+            raise ValueError('--to_set must not be set for the "list" command')
+        if args.n_samples is not None:
+            raise ValueError('--n_samples must not be set for the "list" command')
+    elif args.command == 'move':
+        if args.param_num is None:
+            raise ValueError('--param_num must be set for the "move" command')
+        if args.from_set is None:
+            args.from_set = 'raw'  # default
+        if args.to_set is None:
+            raise ValueError('--to_set must be set for the "move" command')
+        if args.n_samples is None:
+            raise ValueError('--n_samples must be set for the "move" command')
+
+    main(args)

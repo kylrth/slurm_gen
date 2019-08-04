@@ -245,7 +245,7 @@ def clock_to_seconds(s):
 
 
 def get_count(path, verbose=False):
-    """Get the quantity of data samples available at the dataset path.
+    """Get the quantity of data samples available at the set path.
 
     Looks for a metadata file named '.metadata', which should contain the size. If not, it collects the pickle files and
     determines the size.
@@ -345,7 +345,8 @@ def get_counts(dataset, verbose=False):
     for params in os.listdir(dataset_dir):
         out[params] = {}
         v_print(verbose, 'Params: {}'.format(params))
-        for set_name in os.listdir(os.path.join(dataset_dir, params)):
+        # sort to maintain order and allow the user to select param sets by order
+        for set_name in sorted(os.listdir(os.path.join(dataset_dir, params))):
             if not set_name.startswith('.'):  # don't grab things like '.times'
                 v_print(verbose, 'Set name: {}'.format(set_name))
                 out[params][set_name] = get_count(os.path.join(dataset_dir, params, set_name), verbose)
