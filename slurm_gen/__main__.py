@@ -27,7 +27,6 @@ def print_sizes(params, counts):
             param_strings[-1] += next(param_iter) + '|'
         except StopIteration:
             break
-    param_width = max(len(p_str) for p_str in param_strings)
 
     # collect strings of counts
     count_strings = []
@@ -75,29 +74,49 @@ def print_sizes(params, counts):
                 break
 
 
+def single_list(dataset, verbose=False):
+    """Print the count information for a single dataset.
+
+    Args:
+        dataset (str): name (not path) of dataset.
+        verbose (bool): whether to print debug statements.
+    """
+    counts = utils.get_counts(dataset, verbose)
+    count = 1
+    for params in counts:
+        print('Param set #{}:'.format(count))
+        print_sizes(params, counts[params])
+        count += 1
+
+
 def _list(p):
     """List the datasets along with the number of samples generated for them.
 
     Args:
         p (argparse.Namespace): namespace object containing the attributes specified below in the parser definition.
     """
-    counts = {}
-    for dataset in os.listdir(utils.get_cache_dir()):
-        if not dataset.startswith('.'):
-            utils.v_print(p.verbose, 'Getting counts for dataset "{}"'.format(dataset))
-            counts[dataset] = utils.get_counts(dataset, p.verbose)
+    if p.first_arg is None:
+        # get all of them!
+        divider = '-' * 80 + '\n'
+        did_print = False
 
-    divider = '-' * 80
+        sep = ''
+        for dataset in os.listdir(utils.get_cache_dir()):
+            if not dataset.startswith('.'):
+                print(sep, end='')
+                sep = divider
+                print('{}:'.format(dataset.upper()))
+                single_list(dataset, p.verbose)
+                did_print = True
 
-    for dataset in counts:
-        print(divider)
-        print('{}:'.format(dataset.upper()))
-        count = 1
-        for params in counts[dataset]:
-            print('Param set #{}:'.format(count))
-            print_sizes(params, counts[dataset][params])
-            count += 1
-    print(divider)
+        if not did_print:
+            print('No datasets found. Generate one!')
+    else:
+        # get just the one dataset
+        try:
+            single_list(p.first_arg.lower(), p.verbose)
+        except FileNotFoundError:
+            print('No dataset found by name {}'.format(p.first_arg.lower()))
 
 
 def _move(p):
@@ -130,7 +149,10 @@ if __name__ == '__main__':
     )
 
     # required arguments
-    parser.add_argument('command', help='command to perform. One of {"list"}')
+    parser.add_argument('command', help='command to perform. One of {"list", "move"}.')
+    parser.add_argument(
+        'first_arg', nargs='?',
+        help='Argument to the command. If the command is "list", this is the dataset to list counts for.')
     parser.add_argument('-v', '--verbose', action='store_true', help='print debug info while running the command.')
 
     main(parser.parse_args())
