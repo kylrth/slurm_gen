@@ -167,7 +167,7 @@ if __name__ == '__main__':
     parser.add_argument('--cpus_per_task', type=int, default=1, help='number of CPUs per SLURM task')
     parser.add_argument('--name', type=str, default='data gen', help='name for each SLURM task')
     parser.add_argument('--ntasks', type=int, default=1, help='number of tasks to assign to this job')
-    parser.add_argument('--not_rhel7', action='store_false', help='don\'t ask for a RHEL7 node')
+    parser.add_argument('--not_rhel7', action='store_true', help='don\'t ask for a RHEL7 node')
     parser.add_argument(
         '--preemptable', action='store_true',
         help='mark SLURM submissions with "--qos=standby", allowing preemption of the jobs')
