@@ -143,15 +143,26 @@ def _move(p):
 
     from_dir = os.path.join(dataset_dir, param_set, p.from_set.lower())
     to_dir = os.path.join(dataset_dir, param_set, p.to_set.lower())
+    from_dir_nice = os.path.join(*from_dir[len(cache_dir):].split(os.path.sep)[3:])
+    to_dir_nice = os.path.join(*to_dir[len(cache_dir):].split(os.path.sep)[3:])
 
-    from_count = utils.get_count(from_dir, p.verbose)
-    to_count = utils.get_count(to_dir, p.verbose)  # TODO: handle dicts with preprocessed counts
+    # get the counts for the sets under this param set
+    if p.from_set.lower() == 'raw':
+        from_count = utils.get_count(from_dir, p.verbose)
+    else:
+        from_count = utils.get_count(from_dir, p.verbose)['none']
+    if p.to_set.lower() == 'raw':
+        to_count = utils.get_count(to_dir, p.verbose)
+    else:
+        to_count = utils.get_count(to_dir, p.verbose)['none']
 
     if from_count < p.n_samples:
-        raise ValueError('{} only has {} samples'.format(from_dir[len(cache_dir):], from_count))
+        raise ValueError('{} only has {} samples'.format(from_dir_nice, from_count))
 
     # ask confirmation
-    print('Move {} samples from {} to {}?'.format(p.n_samples, from_dir[len(cache_dir):], to_dir[len(cache_dir):]))
+    print('Dataset:', p.dataset)
+    print('Params:', param_set)
+    print('Move {} samples from {} to {}?'.format(p.n_samples, from_dir_nice, to_dir_nice))
     print(
         'This would result in sizes {} and {}, respectively.'.format(from_count - p.n_samples, to_count + p.n_samples),
         end=''
@@ -161,8 +172,30 @@ def _move(p):
         print('Aborting')
         return
 
-    # TODO: perform move
-    # TODO: update counts
+    # perform move
+    from_X, from_y = utils.from_pickle(os.path.join(from_dir, 'none'), p.verbose)
+    to_X, to_y = utils.from_pickle(os.path.join(to_dir, 'none'), p.verbose)
+    to_X.extend(from_X[:p.n_samples])
+    to_y.extend(from_y[:p.n_samples])
+    utils.to_pickle((to_X, to_y), os.path.join(to_dir, 'none'))
+    utils.to_pickle((from_X[p.n_samples:], from_y[p.n_samples:]), os.path.join(from_dir, 'none'))
+
+    # remove preprocessed versions of those samples from the source location
+    if p.from_set.lower() != 'raw':
+        for preproc_set in os.listdir(from_dir):
+            if preproc_set != 'none':
+                preproc_path = os.path.join(from_dir, preproc_set)
+                from_X, from_y = utils.from_pickle(preproc_path, p.verbose)
+                utils.to_pickle(
+                    (from_X[min(p.n_samples, len(from_X)):], from_y[min(p.n_samples, len(from_y)):]), preproc_path)
+
+    # update counts
+    if p.from_set.lower() == 'raw':
+        utils.update_counts(os.path.join(from_dir, 'none'), )
+
+
+    # update counts
+
 
 
 def main(p):
