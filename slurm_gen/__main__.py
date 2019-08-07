@@ -8,18 +8,19 @@ import argparse
 import os
 
 from slurm_gen import utils
+from slurm_gen.data_objects import Cache
 
 
-def print_sizes(params, counts):
-    """Parameter strings are often very long, so we print them (and their counts) nicely.
+def print_sizes(param_set):
+    """Print (nicely) the ParamSet and its sizes.
+
+    Parameter strings are often very long, so we print them (and their counts) nicely.
 
     Args:
-        params (str): parameters and their values, separated by pipe characters ('|').
-        counts (dict): a map from set names to dicts of the quantities for each preprocessor used. The exception is
-                       'raw', which should map to a single number since raw data is not preprocessed.
+        param_set (ParamSet)
     """
     # collect strings of parameters two wide
-    param_iter = iter(params.split('|'))
+    param_iter = iter(param_set.name.split('|'))
     param_strings = []
     while True:
         try:
@@ -29,21 +30,11 @@ def print_sizes(params, counts):
             break
 
     # collect strings of counts
-    count_strings = []
-    for set_name in counts:
-        if set_name == 'raw':
-            count_strings.append(' raw: {}'.format(counts[set_name]))
-        else:
-            count_strings.append(' {}:'.format(set_name))
-            keys = iter(counts[set_name].keys())
-            try:
-                key = next(keys)
-                count_strings[-1] += ' {}: {}'.format(key, counts[set_name][key])
-                while True:
-                    key = next(keys)
-                    count_strings.append(' ' * (len(set_name) + 3) + '{}: {}'.format(key, counts[set_name][key]))
-            except StopIteration:
-                pass
+    count_strings = [' raw: {}'.format(param_set.raw_size)]
+    for group in param_set:
+        count_strings.append(' {}: unprocessed({})'.format(group.name, group.unprocessed_size))
+        for preproc_set in group:
+            count_strings.append(' ' * (len(group.name) + 1) + ': {}({})'.format(preproc_set.name, len(preproc_set)))
 
     # print the param and count strings next to each other
     param_iter = iter(param_strings)
@@ -74,18 +65,16 @@ def print_sizes(params, counts):
                 break
 
 
-def single_list(dataset, verbose=False):
+def single_list(dataset):
     """Print the count information for a single dataset.
 
     Args:
-        dataset (str): name (not path) of dataset.
-        verbose (bool): whether to print debug statements.
+        dataset (Dataset)
     """
-    counts = utils.get_counts(dataset, verbose)
-    count = 1
-    for params in counts:
+    count = 0
+    for param_set in dataset:
         print('Param set #{}:'.format(count))
-        print_sizes(params, counts[params])
+        print_sizes(param_set)
         count += 1
 
 
@@ -96,27 +85,22 @@ def _list(p):
         p (argparse.Namespace): namespace object containing the attributes specified below in the parser definition.
     """
     if p.dataset is None:
-        # get all of them!
+        # list all of them!
         divider = '-' * 80 + '\n'
         did_print = False
 
-        sep = ''
-        for dataset in os.listdir(utils.get_cache_dir()):
-            if not dataset.startswith('.'):
-                print(sep, end='')
-                sep = divider
-                print('{}:'.format(dataset.upper()))
-                single_list(dataset, p.verbose)
-                did_print = True
+        for dataset in Cache():
+            if did_print:
+                print(divider)
+            print('{}:'.format(dataset.name))
+            single_list(dataset)
+            did_print = True
 
         if not did_print:
             print('No datasets found. Generate one!')
     else:
-        # get just the one dataset
-        try:
-            single_list(p.dataset.lower(), p.verbose)
-        except FileNotFoundError:
-            print('No dataset found by name {}'.format(p.dataset.lower()))
+        # get list the one dataset
+        single_list(Cache()[p.dataset])
 
 
 def _move(p):
@@ -125,27 +109,19 @@ def _move(p):
     Args:
         p (argparse.Namespace): namespace object containing the attributes specified below in the parser definition.
     """
-    if p.to_set.lower() == 'train+val':
+    if p.to_set == 'train+val':
         raise ValueError('the name "train+val" is reserved for combining the "train" and "val" sets')
-    if p.from_set.lower() == 'test':
+    if p.from_set == 'test':
         raise ValueError('once samples have been added to "test", they cannot be removed')
 
-    cache_dir = utils.get_cache_dir()
-    dataset_dir = os.path.join(cache_dir, p.dataset)
+    cache = Cache()
+    dataset = cache[p.dataset]
+    param_set = dataset[p.param_num]
 
-    # get the param set from the param number
-    try:
-        param_set = list(sorted(par for par in os.listdir(dataset_dir) if not par.startswith('.')))[p.param_num - 1]
-    except FileNotFoundError:
-        raise ValueError('dataset "{}" does not exist'.format(p.dataset))
-    except IndexError:
-        raise ValueError('param set number {} does not exist'.format(p.param_num))
+    from_group = param_set[p.from_set]
+    to_group = param_set[p.to_set]
 
-    from_dir = os.path.join(dataset_dir, param_set, p.from_set.lower())
-    to_dir = os.path.join(dataset_dir, param_set, p.to_set.lower())
-    from_dir_nice = os.path.join(*from_dir[len(cache_dir):].split(os.path.sep)[3:])
-    to_dir_nice = os.path.join(*to_dir[len(cache_dir):].split(os.path.sep)[3:])
-
+    # currently working here.............................................
     # get the counts for the sets under this param set
     if p.from_set.lower() == 'raw':
         from_count = utils.get_count(from_dir, p.verbose)

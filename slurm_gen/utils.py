@@ -244,6 +244,21 @@ def clock_to_seconds(s):
         raise ValueError('clock string has bad formatting: "{}"'.format(s))
 
 
+def count_samples(path, verbose=False):
+    """Count the number of samples in all the pickle files in the path.
+
+    Args:
+        path (str): directory containing pickle files.
+        verbose (bool): whether to print debug statements.
+    """
+    count = 0
+    for name in os.listdir(path):
+        full_name = os.path.join(path, name)
+        if name.endswith('.pkl') and os.path.isfile(full_name):
+            count += len(from_pickle(full_name, verbose)[1])
+    return count
+
+
 def get_count(path, verbose=False):
     """Get the quantity of data samples available at the set path.
 
