@@ -400,6 +400,8 @@ def get_data(dataset, subset, size=None, params=None, preproc=None, batch_prepro
     # turn the params dict into the param object corresponding to this dataset
     if isinstance(params, dict):
         params = getattr(datasets, dataset).paramClass(**params)
+    elif params is None:
+        params = getattr(datasets, dataset).paramClass()
 
     if subset.lower() == 'test':
         warnings.warn('getting test dataset; do not use except for producing final results')
@@ -431,4 +433,4 @@ def get_data(dataset, subset, size=None, params=None, preproc=None, batch_prepro
     # ensure the directory for this set is available
     os.makedirs(os.path.dirname(pickle_path), exist_ok=True)
 
-    return _load_processed_dataset(dataset_dir, pickle_path, size, preproc, batch_preproc, redo_preproc, verbose)
+    return _load_processed_dataset(pickle_path, size, preproc, batch_preproc, redo_preproc, verbose)
