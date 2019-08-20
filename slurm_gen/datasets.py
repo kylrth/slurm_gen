@@ -1,8 +1,8 @@
-"""Functions defining how each dataset is generated, to be called by the data generation functions defined in
-data_gen.py.
+"""Functions defining how each dataset is generated, to be called by the data generation
+functions defined in data_gen.py.
 
-Each function should have call signature (size, params), where size is the number of examples to produce and params is a
-dict of parameters to accept.
+Each function should have call signature (size, params), where size is the number of
+examples to produce and params is a dict of parameters to accept.
 
 Kyle Roth. 2019-05-17.
 """
@@ -19,37 +19,42 @@ from scipy.interpolate import interp1d
 
 import pyMode as pm
 from pyMode.materials import Si, SiO2
-
 from slurm_gen import utils
 
 
 def generator(cache_every, ParamClass):
-    """Create a decorator that turns a data generating function into one that stores data in the raw cache, caching
-    every cache_every data points.
+    """Create a decorator that turns a data generating function into one that stores
+    data in the raw cache, caching every cache_every data points.
 
     Args:
         cache_every (int): number of data points to load between caching.
-        ParamClass (class): class name of the parameter object that the function accepts. Must have a _to_string()
-                            method that creates a string of the parameter values, and a constructor that creates a new
-                            object from a dict of params that override defaults. It suffices to be a subclass of
+        ParamClass (class): class name of the parameter object that the function
+                            accepts. Must have a _to_string() method that creates a
+                            string of the parameter values, and a constructor that
+                            creates a new object from a dict of params that override
+                            defaults. It suffices to be a subclass of
                             utils.DefaultParamObject.
     Returns:
-        (decorator): decorator for a generating function that creates the caching function as described.
+        (decorator): decorator for a generating function that creates the caching
+                     function as described.
     """
+
     def decorator(f):
-        """Turn a data generating function into one that stores data in the raw cache, caching every cache_every data
-        points.
+        """Turn a data generating function into one that stores data in the raw cache,
+        caching every cache_every data points.
 
         Args:
             f (function): data generating function with call signature (size, params).
         Returns:
-            (function): data generating function that stores the output of the original function in the cache.
+            (function): data generating function that stores the output of the original
+                        function in the cache.
         """
         fn_name = utils.get_func_name(f)
 
         @wraps(f)
         def wrapper(size, params):
-            """Write the results of the function to {cache_dir}/{dataset}/{params}/raw/{somefile}.pkl.
+            """Write the results of the function to
+            {cache_dir}/{dataset}/{params}/raw/{somefile}.pkl.
 
             Args:
                 size (int): number of samples to create.
@@ -61,10 +66,9 @@ def generator(cache_every, ParamClass):
             # cache it in the raw location
             dataset_dir = utils.get_dataset_dir(fn_name, params)
             raw_path = os.path.join(
-                dataset_dir,
-                'raw/{}_{{}}.pkl'.format(utils.get_unique_filename())
+                dataset_dir, "raw/{}_{{}}.pkl".format(utils.get_unique_filename())
             )
-            print('Output path:', raw_path)
+            print("Output path:", raw_path)
             os.makedirs(os.path.dirname(raw_path), exist_ok=True)
 
             iter_data = f(size, params)
@@ -74,10 +78,12 @@ def generator(cache_every, ParamClass):
             to_store_y = []
 
             # create a file to store times
-            time_file = os.path.join(dataset_dir, '.times/{}.time').format(utils.get_unique_filename())
+            time_file = os.path.join(dataset_dir, ".times/{}.time").format(
+                utils.get_unique_filename()
+            )
             os.makedirs(os.path.dirname(time_file), exist_ok=True)
 
-            with open(time_file, 'a+') as time_f:
+            with open(time_file, "a+") as time_f:
                 while True:
                     start = time()
 
@@ -86,7 +92,9 @@ def generator(cache_every, ParamClass):
                         x, y = next(iter_data)
                     except StopIteration:
                         # store everything left over
-                        with open(raw_path.format(data_count // cache_every + 1), 'wb') as outfile:
+                        with open(
+                            raw_path.format(data_count // cache_every + 1), "wb"
+                        ) as outfile:
                             pickle.dump((to_store_x, to_store_y), outfile)
                         break
 
@@ -97,11 +105,13 @@ def generator(cache_every, ParamClass):
 
                     # store it every `cache_every` iterations
                     if not data_count % cache_every:
-                        with open(raw_path.format(data_count // cache_every), 'wb') as outfile:
+                        with open(
+                            raw_path.format(data_count // cache_every), "wb"
+                        ) as outfile:
                             pickle.dump((to_store_x, to_store_y), outfile)
 
                     # record the time spent
-                    time_f.write(str(time() - start) + '\n')
+                    time_f.write(str(time() - start) + "\n")
 
         # store the class used by this function, for use in data_loading.get_data
         wrapper.paramClass = ParamClass
@@ -123,7 +133,7 @@ def make_grid(xs, hs):
         (np.ndarray): linspace of points at the appropriate density for each section.
     """
     grid = [min(xs)]
-    interp = interp1d(xs, hs, kind='linear')
+    interp = interp1d(xs, hs, kind="linear")
     while grid[-1] < max(xs):
         h = interp(grid[-1])
         grid.append(grid[-1] + h)
@@ -163,7 +173,7 @@ def _single_sim(params):
         thickness=params.thickness,
         sidewall_angle=sidewall_angle_radians,
         core=Si,
-        cladding=SiO2
+        cladding=SiO2,
     )
 
     geometry = [waveguide]
@@ -189,9 +199,9 @@ def _single_sim(params):
         # don't overlap data files for this simulation with concurrent simulations
         folderName=os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'cache/.temp_wgms3d',
-            utils.get_unique_filename()
-        )
+            "cache/.temp_wgms3d",
+            utils.get_unique_filename(),
+        ),
     )
 
     sim.run()
@@ -204,19 +214,25 @@ def test__single_sim(**kwargs):
     kwargs will replace default parameters passed to single_sim.
     """
     # set parameters of the experiment
-    p = WavelengthSweepParams(**kwargs)  # overwrite defaults using parameters passed in.
+    p = WavelengthSweepParams(
+        **kwargs
+    )  # overwrite defaults using parameters passed in.
 
     for i, thing in enumerate(_single_sim(p)[1:]):
         # plot each image and save it to kyle/taper_modeling/figures
-        plt.imshow(thing[0].astype(np.float), cmap='gray', alpha=0.5)
-        os.makedirs('kyle/taper_modeling/figures/{}'.format(i), exist_ok=True)
-        plt.savefig('kyle/taper_modeling/figures/{}/straight_{}.png'.format(i, '_'.join(str(thing)
-                                                                                        for thing in kwargs.values())))
+        plt.imshow(thing[0].astype(np.float), cmap="gray", alpha=0.5)
+        os.makedirs("kyle/taper_modeling/figures/{}".format(i), exist_ok=True)
+        plt.savefig(
+            "kyle/taper_modeling/figures/{}/straight_{}.png".format(
+                i, "_".join(str(thing) for thing in kwargs.values())
+            )
+        )
         plt.clf()
 
 
 class WavelengthSweepParams(utils.DefaultParamObject):
     """Attributes defining parameters to the wavelength_sweep experiment."""
+
     # angle of incidence between waveguide side wall and substrate
     sidewall_angle = 90
 
@@ -244,7 +260,8 @@ class WavelengthSweepParams(utils.DefaultParamObject):
 
 @generator(2, WavelengthSweepParams)
 def wavelength_sweep(size, params):
-    """Return all six field profiles for a straight and square waveguide, varying wavelength and nothing else.
+    """Return all six field profiles for a straight and square waveguide, varying
+    wavelength and nothing else.
 
     Args:
         size (int): number of samples to create.
@@ -253,7 +270,9 @@ def wavelength_sweep(size, params):
         (float): random wavelength.
         (np.ndarray): profile images.
     """
-    for wl in np.random.uniform(params.wl_left, params.wl_right, size=size):  # pylint:disable=no-member
+    for wl in np.random.uniform(
+        params.wl_left, params.wl_right, size=size
+    ):  # pylint:disable=no-member
         params.wavelength = wl
         fields = _single_sim(params)
         yield wl, fields
@@ -261,6 +280,7 @@ def wavelength_sweep(size, params):
 
 class DimensionSweepParams(utils.DefaultParamObject):
     """Attributes defining parameters to the dimension_sweep experiment."""
+
     # angle of incidence between waveguide side wall and substrate
     sidewall_angle = 90
 
@@ -289,7 +309,8 @@ class DimensionSweepParams(utils.DefaultParamObject):
 
 @generator(2, DimensionSweepParams)
 def dimension_sweep(size, params):
-    """Return all six field profiles for a straight and square waveguide, varying width and thickness.
+    """Return all six field profiles for a straight and square waveguide, varying width
+    and thickness.
 
     Args:
         size (int): number of samples to create.
@@ -299,8 +320,12 @@ def dimension_sweep(size, params):
         (np.ndarray): profile images.
     """
     for width, thickness in zip(
-            np.random.uniform(params.width_left, params.width_right, size=size),  # pylint:disable=no-member
-            np.random.uniform(params.thickness_left, params.thickness_right, size=size)  # pylint:disable=no-member
+        np.random.uniform(
+            params.width_left, params.width_right, size=size
+        ),  # pylint:disable=no-member
+        np.random.uniform(
+            params.thickness_left, params.thickness_right, size=size
+        ),  # pylint:disable=no-member
     ):
         params.width = width
         params.thickness = thickness

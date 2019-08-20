@@ -14,10 +14,15 @@ def v_print(verbose, s):
 
     Args:
         verbose (bool): whether to print.
-        s (str): string to print. (This will be passed to str.format, so it could be anything with a __repr__.)
+        s (str): string to print. (This will be passed to str.format, so it could be
+                 anything with a __repr__.)
     """
     if verbose:
-        print('{:.6f}: ({}) {}'.format(time.time(), inspect.currentframe().f_back.f_code.co_name, s))
+        print(
+            "{:.6f}: ({}) {}".format(
+                time.time(), inspect.currentframe().f_back.f_code.co_name, s
+            )
+        )
 
 
 def to_pickle(thing, filepath):
@@ -27,15 +32,16 @@ def to_pickle(thing, filepath):
         thing: pickleable object.
         filepath (str): path where file will be written.
     """
-    with open(filepath, 'wb') as f:
+    with open(filepath, "wb") as f:
         pickle.dump(thing, f)
 
 
 def from_pickle(filepath, verbose=False):
     """Load the thing from the pickle file at the path specified.
 
-    Errors while reading the pickle result in deleting the file. It's better to remove the file and try to recover than
-    to raise an exception simply because a data run resulted in a corrupted file.
+    Errors while reading the pickle result in deleting the file. It's better to remove
+    the file and try to recover than to raise an exception simply because a data run
+    resulted in a corrupted file.
 
     Args:
         filepath (str): path where the pickle is located.
@@ -44,18 +50,22 @@ def from_pickle(filepath, verbose=False):
         : the object stored in the pickle, or ([], []) if the read was unsuccessful.
     """
     try:
-        with open(filepath, 'rb') as f:
+        with open(filepath, "rb") as f:
             out = pickle.load(f)
-        v_print(verbose, 'Cache file successfully loaded.')
+        v_print(verbose, "Cache file successfully loaded.")
         return out
     except (EOFError, pickle.UnpicklingError):
-        v_print(verbose, 'Cache file corrupt; deleting.')
+        v_print(verbose, "Cache file corrupt; deleting.")
         os.remove(filepath)
         return [], []
 
 
 class DefaultParamObject:
-    """Class with attributes specifying default parameters for experiments. Not useful to instantiate on its own."""
+    """Class with attributes specifying default parameters for experiments.
+
+    Not useful to instantiate on its own.
+    """
+
     def __init__(self, **kwargs):
         """Replace any default values with those specified in the constructor call.
 
@@ -65,25 +75,25 @@ class DefaultParamObject:
         # ensure all kwargs are class attributes
         if not set(kwargs.keys()).issubset(self.__dict__):
             raise AttributeError(
-                'the following parameters are not attributes of {}: {}'.format(
-                    type(self).__name__,
-                    set(kwargs.keys()) - set(self.__dict__)
-                ))
+                "the following parameters are not attributes of {}: {}".format(
+                    type(self).__name__, set(kwargs.keys()) - set(self.__dict__)
+                )
+            )
         self.__dict__.update(kwargs)
 
     def _to_string(self):
         """Get a string representing the values of all the parameters.
 
-        This is used to create the directory for samples created with these parameters. Attributes beginning with an
-        underscore are not included.
+        This is used to create the directory for samples created with these parameters.
+        Attributes beginning with an underscore are not included.
 
         Returns:
             (str): each parameter's name and value, separated by pipe characters ("|").
         """
         out = ""
         for attr in dir(self):
-            if not attr.startswith('_'):
-                out += '|' + attr + repr(getattr(self, attr))
+            if not attr.startswith("_"):
+                out += "|" + attr + repr(getattr(self, attr))
 
         return out[1:]  # cut off first pipe character
 
@@ -99,7 +109,7 @@ def get_func_name(func):
         (str): __name__ attribute of func, unless func is None then 'none'.
     """
     if func is None:
-        return 'none'  # unprocessed version
+        return "none"  # unprocessed version
     return func.__name__
 
 
@@ -120,7 +130,9 @@ def get_cache_dir():
     Returns:
         (str): the absolute path.
     """
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cache')
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cache"
+    )
 
 
 def get_dataset_dir(name, params):
@@ -128,33 +140,37 @@ def get_dataset_dir(name, params):
 
     Args:
         name (str): name of dataset.
-        params: an object with a _to_string() method, containing parameters used by the generating function.
+        params: an object with a _to_string() method, containing parameters used by the
+                generating function.
     """
     return os.path.join(get_cache_dir(), name, params._to_string())
 
 
 def get_SLURM_output_dir():
-    """Get the absolute path of the directory where data generation jobs should place their output.
+    """Get the absolute path of the directory where data generation jobs should place
+    their output.
 
     From the directory of this module, this is the absolute path of ./slurm_output.
 
     Returns:
         (str): the absolute path.
     """
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'slurm_output')
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "slurm_output")
 
 
 def get_unique_filename():
-    """Get a string guaranteed not to be repeated on the same computer (unless the clock changes).
+    """Get a string guaranteed not to be repeated on the same computer (unless the clock
+    changes).
 
-    If inside a SLURM job, return the SLURM job ID. Otherwise, return digits from time.time().
+    If inside a SLURM job, return the SLURM job ID. Otherwise, return digits from
+    time.time().
 
     Returns:
         (str): unique string.
     """
-    if 'SLURM_JOBID' in os.environ:
-        return os.environ['SLURM_JOBID']
-    return str(time.time()).replace('.', '')
+    if "SLURM_JOBID" in os.environ:
+        return os.environ["SLURM_JOBID"]
+    return str(time.time()).replace(".", "")
 
 
 def samples_to_jobs(size, njobs):
@@ -164,7 +180,8 @@ def samples_to_jobs(size, njobs):
         size (int): number of samples requested.
         njobs (int): number of jobs to create.
     Returns:
-        (list): list of length `njobs`, containing the number of samples for each job to generate.
+        (list): list of length `njobs`, containing the number of samples for each job to
+                generate.
     """
     even = size // njobs
     out = [even] * njobs
@@ -186,13 +203,14 @@ def _clock_to_seconds(s, val):
 
     Args:
         s (str): substring containing values separated by colons.
-        val (int): initial time multiplier, which is multiplied by 60 after each iteration.
+        val (int): initial time multiplier, which is multiplied by 60 after each
+                   iteration.
     Returns:
         (int): computed time value.
     """
     out = 0
 
-    for count in reversed(s.split(':')):
+    for count in reversed(s.split(":")):
         out += int(count) * val
         val *= 60
 
@@ -200,9 +218,11 @@ def _clock_to_seconds(s, val):
 
 
 def clock_to_seconds(s):
-    """Convert a time string (in one of the formats accepted by SLURM) to a number of seconds.
+    """Convert a time string (in one of the formats accepted by SLURM) to a number of
+    seconds.
 
-    Acceptable time formats include "MM", "MM:SS", "HH:MM:SS", "D-HH", "D-HH:MM" and "D-HH:MM:SS".
+    Acceptable time formats include "MM", "MM:SS", "HH:MM:SS", "D-HH", "D-HH:MM" and
+    "D-HH:MM:SS".
 
     Args:
         s (str): time string.
@@ -214,18 +234,18 @@ def clock_to_seconds(s):
         days = None
 
         # days
-        if '-' in s:
-            days, s = s.split('-')
+        if "-" in s:
+            days, s = s.split("-")
             out += int(days) * 86400
 
-            if len(s.split(':')) == 2:
+            if len(s.split(":")) == 2:
                 # HH:MM
                 return out + _clock_to_seconds(s, 60)
-            if len(s.split(':')) == 1:
+            if len(s.split(":")) == 1:
                 # HH
                 return out + int(s) * 3600
 
-        split = s.split(':')
+        split = s.split(":")
 
         if len(split) == 3:
             # HH:MM:SS
@@ -254,7 +274,7 @@ def count_samples(path, verbose=False):
     count = 0
     for name in os.listdir(path):
         full_name = os.path.join(path, name)
-        if name.endswith('.pkl') and os.path.isfile(full_name):
+        if name.endswith(".pkl") and os.path.isfile(full_name):
             count += len(from_pickle(full_name, verbose)[1])
     return count
 
@@ -262,11 +282,11 @@ def count_samples(path, verbose=False):
 def get_count(path, verbose=False):
     """Get the quantity of data samples available at the set path.
 
-    Looks for a metadata file named '.metadata', which should contain the size. If not, it collects the pickle files and
-    determines the size.
+    Looks for a metadata file named '.metadata', which should contain the size. If not,
+    it collects the pickle files and determines the size.
 
-    If the path is to a 'raw' set of samples, just the number of samples is returned. Otherwise, a dict mapping
-    preprocessor names to numbers of samples is returned.
+    If the path is to a 'raw' set of samples, just the number of samples is returned.
+    Otherwise, a dict mapping preprocessor names to numbers of samples is returned.
 
     Args:
         path (str): path to directory.
@@ -276,51 +296,58 @@ def get_count(path, verbose=False):
     """
     # check to see if the .metadata file contains the size
     v_print(verbose, 'Getting count for directory "{}"'.format(path))
-    if os.path.isfile(os.path.join(path, '.metadata')):
-        v_print(verbose, 'Using metadata file')
-        with open(os.path.join(path, '.metadata'), 'r') as metadata:
-            if path.endswith('raw'):
+    if os.path.isfile(os.path.join(path, ".metadata")):
+        v_print(verbose, "Using metadata file")
+        with open(os.path.join(path, ".metadata"), "r") as metadata:
+            if path.endswith("raw"):
                 for line in metadata:
-                    if line.startswith('size: '):
-                        # for raw, there is no preprocessing, so only a number is desired
-                        out = int(line.split(': ')[1])
-                        v_print(verbose, 'Found raw size {}'.format(out))
+                    if line.startswith("size: "):
+                        # for raw, there is no preprocessing: only a number is desired
+                        out = int(line.split(": ")[1])
+                        v_print(verbose, "Found raw size {}".format(out))
                         return out
             else:
                 out = {}
                 for line in metadata:
                     if line.startswith('size "'):
-                        out[line.split('"')[1]] = int(line.split(': ')[1])
-                v_print(verbose, 'Found sizes: {}'.format(out))
+                        out[line.split('"')[1]] = int(line.split(": ")[1])
+                v_print(verbose, "Found sizes: {}".format(out))
                 return out
 
     # count the samples in the pkl files by hand
-    print('No metadata is present for the dataset at {}'.format(path))
-    print('We\'ll have to count by hand. This may take a long time, depending on the number of samples.')
-    v_print(verbose, 'Counting by hand')
-    if path.endswith('raw'):
+    print("No metadata is present for the dataset at {}".format(path))
+    print(
+        "We'll have to count by hand."
+        " This may take a long time, depending on the number of samples."
+    )
+    v_print(verbose, "Counting by hand")
+    if path.endswith("raw"):
         count = 0
         for file in os.listdir(path):
-            if file.endswith('.pkl'):
+            if file.endswith(".pkl"):
                 v_print(verbose, 'Adding count from file "{}"'.format(file))
                 count += len(from_pickle(os.path.join(path, file))[1])
-                v_print(verbose, 'Count is now {}'.format(count))
+                v_print(verbose, "Count is now {}".format(count))
 
         # save the count for next time
-        v_print(verbose, 'Writing count to "{}"'.format(os.path.join(path, '.metadata')))
-        with open(os.path.join(path, '.metadata'), 'w+') as metadata:
-            metadata.write('size: {}\n'.format(count))
+        v_print(
+            verbose, 'Writing count to "{}"'.format(os.path.join(path, ".metadata"))
+        )
+        with open(os.path.join(path, ".metadata"), "w+") as metadata:
+            metadata.write("size: {}\n".format(count))
     else:
         count = {}
         for file in os.listdir(path):
-            if file.endswith('.pkl'):
+            if file.endswith(".pkl"):
                 v_print(verbose, 'Adding count from file "{}"'.format(file))
                 count[file[:-4]] = len(from_pickle(os.path.join(path, file))[1])
-                v_print(verbose, 'Count is now {}'.format(count))
+                v_print(verbose, "Count is now {}".format(count))
 
         # save the count for next time
-        v_print(verbose, 'Writing count to "{}"'.format(os.path.join(path, '.metadata')))
-        with open(os.path.join(path, '.metadata'), 'w+') as metadata:
+        v_print(
+            verbose, 'Writing count to "{}"'.format(os.path.join(path, ".metadata"))
+        )
+        with open(os.path.join(path, ".metadata"), "w+") as metadata:
             for set_name in count:
                 metadata.write('size "{}": {}\n'.format(set_name, count[set_name]))
 
@@ -359,11 +386,13 @@ def get_counts(dataset, verbose=False):
 
     for params in os.listdir(dataset_dir):
         out[params] = {}
-        v_print(verbose, 'Params: {}'.format(params))
+        v_print(verbose, "Params: {}".format(params))
         # sort to maintain order and allow the user to select param sets by order
         for set_name in sorted(os.listdir(os.path.join(dataset_dir, params))):
-            if not set_name.startswith('.'):  # don't grab things like '.times'
-                v_print(verbose, 'Set name: {}'.format(set_name))
-                out[params][set_name] = get_count(os.path.join(dataset_dir, params, set_name), verbose)
+            if not set_name.startswith("."):  # don't grab things like '.times'
+                v_print(verbose, "Set name: {}".format(set_name))
+                out[params][set_name] = get_count(
+                    os.path.join(dataset_dir, params, set_name), verbose
+                )
 
     return out
