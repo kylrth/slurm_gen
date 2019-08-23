@@ -58,7 +58,6 @@ def create_SLURM_command(dataset, size, params, SLURM_out, options):
                  - cpus_per_task: number of CPUs per SLURM task.
                  - name: name for each SLURM task.
                  - ntasks: number of tasks to assign to this job.
-                 - not_rhel7: don't ask for a RHEL7 node for these tasks.
                  - test: mark SLURM submissions with "--qos=test".
                  - preemptable: mark SLURM submissions with "--qos=standby", allowing
                                 preemption of the jobs.
@@ -99,9 +98,6 @@ def create_SLURM_command(dataset, size, params, SLURM_out, options):
     if qos:
         command += qos
 
-    # add additional options
-    if not options.not_rhel7:
-        command += " -C 'rhel7'"
     if options.GPUs:
         command += " --gres=gpu:{}".format(utils.sanitize_str(options.GPUs))
 
@@ -216,9 +212,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--ntasks", type=int, default=1, help="number of tasks to assign to this job"
-    )
-    parser.add_argument(
-        "--not_rhel7", action="store_true", help="don't ask for a RHEL7 node"
     )
     parser.add_argument(
         "--preemptable",
