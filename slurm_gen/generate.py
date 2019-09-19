@@ -120,9 +120,8 @@ def generate_data(dataset, size, params, options, njobs=1, verbose=False):
     """
     SLURM_out = utils.get_SLURM_output_dir()
 
-    for nsamples in utils.samples_to_jobs(
-        size, njobs
-    ):  # the number of samples each job should generate
+    for nsamples in utils.samples_to_jobs(size, njobs):
+        # nsamples is the number of samples each job should generate
         command = create_SLURM_command(dataset, nsamples, params, SLURM_out, options)
         if verbose:
             print("Submitting the following job:")

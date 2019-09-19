@@ -154,13 +154,16 @@ def _single_sim(params):
         wavelength (Number): wavelength of light in micrometers.
         numModes (int): number of modes to solve for.
     Returns:
-        (list): wave numbers of modes solved for.
-        (list): radius (r) of H field for each mode.
-        (list): height (z) of H field for each mode.
-        (list): angle (phi) of H field for each mode.
-        (list): radius (r) of E field for each mode.
-        (list): height (z) of E field for each mode.
-        (list): angle (phi) of E field for each mode.
+        (list): x-position values for the samples in the image.
+        (list): y-position values for the samples in the image.
+        (tuple): the following stuff:
+                 (list): wave numbers of modes solved for.
+                 (list): radius (r) of H field for each mode.
+                 (list): height (z) of H field for each mode.
+                 (list): angle (phi) of H field for each mode.
+                 (list): radius (r) of E field for each mode.
+                 (list): height (z) of E field for each mode.
+                 (list): angle (phi) of E field for each mode.
     """
     # set up the waveguide geometry
     sidewall_angle_radians = params.sidewall_angle / 180 * np.pi
@@ -205,7 +208,7 @@ def _single_sim(params):
     )
 
     sim.run()
-    return sim.getFields()
+    return xx, yy, sim.getFields()
 
 
 def test__single_sim(**kwargs):
@@ -218,7 +221,7 @@ def test__single_sim(**kwargs):
         **kwargs
     )  # overwrite defaults using parameters passed in.
 
-    for i, thing in enumerate(_single_sim(p)[1:]):
+    for i, thing in enumerate(_single_sim(p)[2][1:]):
         # plot each image and save it to kyle/taper_modeling/figures
         plt.imshow(thing[0].astype(np.float), cmap="gray", alpha=0.5)
         os.makedirs("kyle/taper_modeling/figures/{}".format(i), exist_ok=True)
@@ -274,7 +277,7 @@ def wavelength_sweep(size, params):
         params.wl_left, params.wl_right, size=size
     ):  # pylint:disable=no-member
         params.wavelength = wl
-        fields = _single_sim(params)
+        fields = _single_sim(params)[2]  # just keep fields
         yield wl, fields
 
 
@@ -329,5 +332,34 @@ def dimension_sweep(size, params):
     ):
         params.width = width
         params.thickness = thickness
-        fields = _single_sim(params)
+        fields = _single_sim(params)[2]  # just keep fields
         yield (width, thickness), fields
+
+
+@generator(200, DimensionSweepParams)
+def dimension_sweep_H_z_single(size, params):
+    """Return the H_z profiles with the same experiment as `dimension_sweep`, but with
+    x- and y-position as features and a single value as the target.
+
+    Args:
+        size (int): number of samples to create.
+        params (DimensionSweepParams): parameters to the experiment.
+    Yields:
+        (tuple(float, float, float, float)): random width, random height, x-position,
+                                             y-position.
+        (float): value of the H_z field at the x- and y-position in the features.
+    """
+    for width, thickness in zip(
+        np.random.uniform(
+            params.width_left, params.width_right, size=size
+        ),  # pylint:disable=no-member
+        np.random.uniform(
+            params.thickness_left, params.thickness_right, size=size
+        ),  # pylint:disable=no-member
+    ):
+        params.width = width
+        params.thickness = thickness
+        xx, yy, fields = _single_sim(params)
+        for i, x in enumerate(xx):
+            for j, y in enumerate(yy):
+                yield (width, thickness, x, y), fields[1][0][i][j]
