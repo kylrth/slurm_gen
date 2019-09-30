@@ -28,8 +28,7 @@ raw_SLURM = (
 module load openblas
 module load boost
 module load python/3.6
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{HOME}}/usr/lib/
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{HOME}}/usr/lib64/
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{HOME}}/usr/lib/:${{HOME}}/usr/lib64/
 export PATH="${{HOME}}/usr/bin:$PATH"
 
 python3 -u -c"""
