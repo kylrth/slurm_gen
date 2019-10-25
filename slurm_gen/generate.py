@@ -18,8 +18,9 @@ Kyle Roth. 2019-05-27.
 import argparse
 import os
 import subprocess
+import sys
 
-from slurm_gen import utils
+from slurm_gen import datasets, utils
 
 # the base string for submitting a data generation job
 raw_SLURM = (
@@ -103,7 +104,20 @@ def create_SLURM_command(dataset, size, params, SLURM_out, options):
     return command
 
 
-def generate_data(dataset, size, params, options, njobs=1, verbose=False):
+def _generate_here(dataset, size, params):
+    """Using the current process, generate `size` samples of the dataset, using the
+    generation function defined in datasets.py.
+
+    Args:
+        dataset (str): name of dataset to generate. Must match a function retrieved by
+                       get_dataset.
+        size (int): number of samples to generate.
+        params (dict): parameter dict to pass to generating function.
+    """
+    getattr(datasets, dataset)(size, params)
+
+
+def _generate_with_SLURM(dataset, size, params, options, njobs=1, verbose=False):
     """Using SLURM, generate `size` samples of the dataset, using the generation
     function defined in datasets.py.
 
@@ -148,7 +162,10 @@ def main(p):
         p (argparse.Namespace): namespace object containing the attributes specified
                                 below in the parser definition.
     """
-    generate_data(p.dataset, p.n, p.params, p, p.njobs, p.verbose)
+    if p.this_node:
+        _generate_here(p.dataset, p.n, p.params)
+    else:
+        _generate_with_SLURM(p.dataset, p.n, p.params, p, p.njobs, p.verbose)
 
 
 if __name__ == "__main__":
@@ -165,18 +182,24 @@ if __name__ == "__main__":
     parser.add_argument(
         "--njobs",
         type=int,
-        required=True,
+        required="--this_node" not in sys.argv,  # only require if submitting to SLURM
         help="number of SLURM jobs to submit. "
         "Each job will produce about n/njobs samples",
     )
     parser.add_argument(
         "--mem_per_cpu",
         type=str,
-        required=True,
+        required="--this_node" not in sys.argv,  # only require if submitting to SLURM
         help='memory to assign to each CPU in a SLURM job, e.g. "2GB"',
     )
 
     # optional arguments
+    parser.add_argument(
+        "--this_node",
+        action="store_true",
+        help="run the data-generating code in this process, instead of submitting it "
+        "to SLURM. This ignores all SLURM options.",
+    )
     parser.add_argument(
         "-l",
         "--at_least",
