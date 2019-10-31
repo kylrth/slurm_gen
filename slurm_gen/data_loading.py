@@ -13,88 +13,6 @@ import warnings
 from slurm_gen import datasets, utils
 
 
-class InsufficientSamplesError(Exception):
-    """Helpful error messages for determining how much more time is needed to create the
-    requested size of dataset."""
-
-    def __init__(self, size, dataset_path, verbose=False):
-        """Use the size needed to determine how much compute time it will take to
-        generate that many samples.
-
-        Args:
-            size (int): number of samples needed.
-            dataset_path (str): path to the dataset. Should include params but not set
-                                name ('train', 'test').
-            verbose (bool): print debugging statements to stdout.
-        """
-        self.needed = size
-        times = self._get_times(dataset_path, verbose)
-        if times:
-            est_time = self.s_to_clock(size * sum(times) / len(times))
-            super(InsufficientSamplesError, self).__init__(
-                "{} samples need to be generated (estimated time {})".format(
-                    size, est_time
-                )
-            )
-        else:
-            # no times have been recorded yet
-            super(InsufficientSamplesError, self).__init__(
-                "{} samples need to be generated;"
-                " generate a small number first to estimate time".format(size)
-            )
-
-    @staticmethod
-    def _get_times(dp, verbose=False):
-        """Get the recorded times for previous data generation.
-
-        Also compile the times into a single file so it's faster next time.
-
-        Args:
-            dp (str): path to the dataset, including params but not the set name.
-            verbose (bool): print debugging statements to stdout.
-        Returns:
-            list(float): the collected times, in seconds.
-        """
-        times = []
-        os.makedirs(os.path.join(dp, ".times"), exist_ok=True)
-        for fp in glob(os.path.join(dp, ".times", "*.time")):
-            with open(fp, "r") as infile:
-                times.extend(infile.read().strip().split())
-            os.remove(fp)
-        utils.v_print(
-            verbose,
-            'Collected {} timings from "{}".'.format(
-                len(times), os.path.join(dp, ".times")
-            ),
-        )
-
-        # store in a single file
-        with open(os.path.join(dp, ".times", "compiled.time"), "w") as outfile:
-            outfile.writelines([time + "\n" for time in times])
-        utils.v_print(
-            verbose,
-            'Wrote timings to "{}"'.format(os.path.join(dp, ".times", "compiled.time")),
-        )
-
-        return [float(time) for time in times]
-
-    @staticmethod
-    def s_to_clock(s):
-        """Convert seconds to clock format, rounding up.
-
-        Args:
-            s (float): number of seconds.
-        Returns:
-            (str): clock time in HH:MM:SS format.
-        """
-        s = int(s) + 1
-        h = s // 3600
-        s = s % 3600
-        m = s // 60
-        s = s % 60
-        return "{}:{}:{}".format(str(h).zfill(2), str(m).zfill(2), str(s).zfill(2))
-
-
 def _collect_raw(raw_path, raw_files, size, verbose=False):
     """Collect raw samples to be assigned by _assign_data.
 
@@ -173,7 +91,9 @@ def _collect_raw(raw_path, raw_files, size, verbose=False):
     except StopIteration:
         # we ran out of files to load from. Good thing we didn't delete those files yet!
         utils.v_print(verbose, "Ran out of raw files before enough samples were found.")
-        raise InsufficientSamplesError(size - len(raw_X), os.path.dirname(raw_path))
+        raise utils.InsufficientSamplesError(
+            size - len(raw_X), os.path.dirname(raw_path)
+        )
 
     return raw_X, raw_y, to_delete, to_save
 
@@ -512,7 +432,7 @@ def get_data(
             X, y = get_data(
                 dataset, "train", needed_samples, params, preproc, batch_preproc
             )
-        except InsufficientSamplesError as e:
+        except utils.InsufficientSamplesError as e:
             needed_samples = e.needed
             X, y = get_data(
                 dataset, "train", size - needed_samples, params, preproc, batch_preproc

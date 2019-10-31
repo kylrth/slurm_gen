@@ -15,16 +15,20 @@ class PreprocessedData:
     """Represents a single list of data samples, preprocessed by a specific
     preprocessor."""
 
-    def __init__(self, cache_path):
+    def __init__(self, cache_path, verbose=False):
         """Store the path to the data.
 
         Args:
-            cache_path (str): path to the pickle file containing the data.
+            cache_path (str): path to the directory containing pickle files with the
+                              processed data.
+            verbose (bool): whether to print debug statements.
         """
         self.path = cache_path
-        self.name = ".".join(
-            os.path.basename(os.path.normpath(cache_path)).split(".")[:-1]
-        )
+        self.name = os.path.basename(os.path.normpath(cache_path))
+        self.verbose = verbose
+        utils.v_print(verbose, "creating new PreprocessedData object with")
+        utils.v_print(verbose, "  path '{}'".format(self.path))
+        utils.v_print(verbose, "  and name '{}'".format(self.name))
 
         self._size = None
 
@@ -39,46 +43,92 @@ class PreprocessedData:
             return self._size
 
         # try to read it from the metadata file
-        metadata_path = os.path.join(
-            os.path.dirname(os.path.normpath(self.path)), ".metadata"
-        )
+        metadata_path = os.path.join(self.path, ".metadata")
         if os.path.isfile(metadata_path):
+            utils.v_print(self.verbose, "reading size from '{}'".format(metadata_path))
             with open(metadata_path) as infile:
                 for line in infile:
-                    if line.startswith('size "{}"'.format(self.name)):
+                    if line.startswith("size: ".format(self.name)):
                         self._size = int(line.split(": ")[1])
                         return self._size
 
         # count the number by hand
-        self._size = len(utils.from_pickle(self.path)[1])
+        self._size = utils.count_samples(self.path, self.verbose)
 
         # store it in the metadata file
+        utils.v_print(
+            self.verbose, "writing size '{}' to '{}'".format(self._size, metadata_path)
+        )
         with open(metadata_path, "a+") as outfile:
-            outfile.write('size "{}": {}\n'.format(self.name, self._size))
+            outfile.write("size: {}\n".format(self.name, self._size))
 
         return self._size
 
-    def __len__(self):
-        return self.size
+    @size.setter
+    def size(self, value):
+        """Set a new size, because we know we've preprocessed new samples since we last
+        calculated the size.
+
+        Args:
+            value (int): new size of PreprocessedData.
+        """
+        self._size = value
+        if os.path.exists(os.path.join(self.path, ".metadata")):
+            os.remove(os.path.join(self.path, ".metadata"))
+
+    def get(self, size):
+        """Return `size` samples from this preprocessed dataset.
+
+        Warning: this data comes in order. You'll probably want to shuffle it.
+
+        Args:
+            size (int): number of samples to return.
+        Returns:
+            (list): features concatenated from pickle files.
+            (list): labels concatenated from pickle files.
+        """
+        files = sorted(os.listdir(self.path))
+        X, y = [], []
+
+        while len(X) < size:
+            file = next(files)
+            new_X, new_y = utils.from_pickle(
+                os.path.join(self.path, file), self.verbose
+            )
+            utils.v_print(
+                self.verbose,
+                "({}/{}) read {} samples from '{}'".format(
+                    len(X), size, len(new_X), file
+                ),
+            )
+
+            X.extend(new_X)
+            y.extend(new_y)
+
+        return X[:size], y[:size]
 
 
 class Group:
     """Represents a group of data samples, and contains references to all contained
     PreprocessedData."""
 
-    def __init__(self, cache_path):
+    def __init__(self, cache_path, verbose=False):
         """Store the path to the group, to allow access to raw data.
 
         Args:
-            cache_path (str): path to group; should contain one pickle file for each
-                              preprocessed set.
+            cache_path (str): path to group; should contain pickle files for the
+                              unprocessed set and directories for each preprocessed set.
+            verbose (bool): whether to print debug statements.
         """
         self.path = cache_path
         self.name = os.path.basename(os.path.normpath(cache_path))
+        self.verbose = verbose
+        utils.v_print(verbose, "creating new Group object with")
+        utils.v_print(verbose, "  path '{}'".format(self.path))
+        utils.v_print(verbose, "  and name '{}'".format(self.name))
+
         self._iterator = None
-        self._elements = {
-            item for item in os.listdir(self.path) if not item.startswith(".")
-        }
+        self._elements = {item for item in os.listdir(self.path) if os.path.isdir(item)}
 
         self._unprocessed_size = None
 
@@ -95,22 +145,131 @@ class Group:
         # try to read it from the metadata file
         metadata_path = os.path.join(self.path, ".metadata")
         if os.path.isfile(metadata_path):
+            utils.v_print(self.verbose, "reading size from '{}'".format(metadata_path))
             with open(metadata_path) as infile:
                 for line in infile:
-                    if line.startswith('size "none"'):
+                    if line.startswith("size:"):
                         self._unprocessed_size = int(line.split(": ")[1])
                         return self._unprocessed_size
 
         # count the number by hand
-        self._unprocessed_size = len(
-            utils.from_pickle(os.path.join(self.path, "none.pkl"))[1]
-        )
+        self._unprocessed_size = utils.count_samples(self.path, self.verbose)
 
         # store it in the metadata file
+        utils.v_print(
+            self.verbose,
+            "writing size '{}' to '{}'".format(self._unprocessed_size, metadata_path),
+        )
         with open(metadata_path, "a+") as outfile:
-            outfile.write('size "none": {}\n'.format(self._unprocessed_size))
+            outfile.write("size: {}\n".format(self._unprocessed_size))
 
         return self._unprocessed_size
+
+    @staticmethod
+    def _apply_preprocessor(func, X, y, batch_preproc, verbose):
+        """Apply the preprocessor to the data, and return it."""
+        utils.v_print(verbose, "applying preprocessor '{}'.".format(func.__name__))
+        if batch_preproc:
+            utils.v_print(verbose, "    (using batch application)")
+            X, y = func(X, y)
+        else:
+            utils.v_print(verbose, "    (using individual application)")
+            try:
+                X, y = zip(*(func(x, wai) for x, wai in zip(X, y)))
+            except TypeError as e:
+                if str(e).startswith("zip argument #") and str(e).endswith(
+                    " must support iteration"
+                ):
+                    raise TypeError("preprocessor did not return the correct signature")
+                raise
+        return list(X), list(y)
+
+    def assert_preprocessed_size(self, func, size, batch_preproc=False):
+        """Ensure that at least `size` samples have been processed with `func`.
+
+        If batch_preproc is set, the preprocessor must accept a list of data points and
+        a list of corresponding labels. Otherwise, it must accept a single data point
+        and its corresponding label. In either case, it should return preprocessed
+        versions of both data and label.
+
+        Args:
+            func (callable): preprocessing function to be applied to data. If
+                             batch_preproc is False, call signature must allow (x, y)
+                             where x is a single data point and y is a label. If
+                             batch_preproc is True, `func` is called on X, y where X is
+                             an iterable of all data points and y is an iterable of all
+                             labels.
+            size (int): number of samples to preprocess.
+            batch_preproc (bool): if True, `func` is called on the entire dataset at
+                                  once. Otherwise, `func` is called on a single data
+                                  point and label at a time.
+        Raises:
+            (utils.InsufficientSamplesError): there are not enough unprocessed samples.
+        """
+        if self.unprocessed_size < size:
+            raise utils.InsufficientSamplesError(
+                size - self.unprocessed_size, self.path, self.verbose
+            )
+
+        # get unprocessed data
+        unproc_files = sorted(
+            file for file in os.listdir(self.path) if file.endswith(".pkl")
+        )
+
+        # make sure the PreprocessedData exists
+        self._elements.add(func.__name__)
+        proc_set = self[func.__name__]
+        os.makedirs(proc_set.path, exist_ok=True)
+
+        # get the current size of the PreprocessedData and the individual files which
+        # have already been preprocessed
+        count = proc_set.size
+        current_proc_files = set(os.listdir(proc_set.path))
+
+        # preprocess files, skipping those that are already preprocessed
+        for file in unproc_files:
+            if count > size:
+                break
+            if file in current_proc_files:
+                continue
+
+            # preprocess it!
+            X, y = utils.from_pickle(os.path.join(self.path, file), self.verbose)
+            count += len(X)
+            X, y = self._apply_preprocessor(func, X, y, batch_preproc, self.verbose)
+            utils.to_pickle((X, y), os.path.join(proc_set.path, file))
+            proc_set.size = count
+
+    def get_unprocessed(self, size):
+        """Return `size` samples from the unprocessed dataset.
+
+        Warning: this data comes in order. You'll probably want to shuffle it.
+
+        Args:
+            size (int): number of samples to return.
+        Returns:
+            (list): features concatenated from pickle files.
+            (list): labels concatenated from pickle files.
+        """
+        files = sorted(os.listdir(self.path))
+        X, y = [], []
+
+        while len(X) < size:
+            file = next(files)
+            new_X, new_y = utils.from_pickle(
+                os.path.join(self.path, file), self.verbose
+            )
+            utils.v_print(
+                self.verbose,
+                "({}/{}) read {} samples from '{}'".format(
+                    len(X), size, len(new_X), file
+                ),
+            )
+
+            X.extend(new_X)
+            y.extend(new_y)
+
+        return X[:size], y[:size]
 
     def __iter__(self):
         self._iterator = iter(self._elements)
@@ -123,21 +282,41 @@ class Group:
             (PreprocessedData): the next preprocessed data that has been created under
                                 this group.
         """
-        return PreprocessedData(os.path.join(self.path, next(self._iterator)))
+        return PreprocessedData(
+            os.path.join(self.path, next(self._iterator)), self.verbose
+        )
+
+    def __getitem__(self, idx):
+        """Allow access by name of PreprocessedData."""
+        if not isinstance(idx, str):
+            raise IndexError(
+                "Group access is only permitted by str; got {}".format(type(idx))
+            )
+        if idx not in self._elements:
+            raise IndexError(
+                "no such group found: {}".format(os.path.join(self.path, idx))
+            )
+        return PreprocessedData(os.path.join(self.path, idx), self.verbose)
 
 
 class ParamSet:
     """Represents a parameter set with all its datasets beneath it."""
 
-    def __init__(self, cache_path):
+    def __init__(self, cache_path, verbose=False):
         """Store the path to the param set to allow access to child Groups and raw data.
 
         Args:
             cache_path (str): path to parameter set; should be a subdirectory of a
                               dataset directory.
+            verbose (bool): whether to print debug statements.
         """
         self.path = cache_path
         self.name = os.path.basename(os.path.normpath(cache_path))
+        self.verbose = verbose
+        utils.v_print(verbose, "creating new ParamSet object with")
+        utils.v_print(verbose, "  path '{}'".format(self.path))
+        utils.v_print(verbose, "  and name '{}'".format(self.name))
+
         self._iterator = None
         self._elements = {
             item
@@ -160,6 +339,9 @@ class ParamSet:
         # try to read it from the metadata file
         raw_metadata_path = os.path.join(self.path, "raw", ".metadata")
         if os.path.isfile(raw_metadata_path):
+            utils.v_print(
+                self.verbose, "reading size from '{}'".format(raw_metadata_path)
+            )
             with open(raw_metadata_path) as infile:
                 for line in infile:
                     if line.startswith("size: "):
@@ -167,13 +349,79 @@ class ParamSet:
                         return self._raw_size
 
         # count the number by hand
-        self._raw_size = utils.count_samples(os.path.join(self.path, "raw"))
+        self._raw_size = utils.count_samples(
+            os.path.join(self.path, "raw"), self.verbose
+        )
 
         # store it in the metadata file
+        utils.v_print(
+            self.verbose,
+            "writing size '{}' to '{}'".format(self._raw_size, raw_metadata_path),
+        )
         with open(raw_metadata_path, "w+") as outfile:
             outfile.write("size: {}\n".format(self._raw_size))
 
         return self._raw_size
+
+    def move(self, target, size):
+        """Move `size` raw samples to the group named `target`.
+
+        Args:
+            target (str): name of target group, e.g. "train" or "test".
+            size (int): number of samples to move.
+        """
+        if target == "raw":
+            raise ValueError("samples are already in 'raw' directory")
+
+        if size > self.raw_size:
+            raise utils.InsufficientSamplesError(size - self.raw_size, self.path)
+
+        self._elements.add(target)
+        os.makedirs(os.path.join(self.path, target), exist_ok=True)
+
+        # source and destination paths
+        raw_path = os.path.join(self.path, "raw")
+        target_path = os.path.join(self.path, target)
+        utils.v_print(self.verbose, "source path: '{}'".format(raw_path))
+        utils.v_print(self.verbose, "target path: '{}'".format(target_path))
+
+        files = iter(os.listdir(raw_path))
+
+        count = 0
+        while True:
+            current_file = next(files)
+            X, y = utils.from_pickle(os.path.join(raw_path, current_file), self.verbose)
+            count += len(X)
+            if count > size:
+                # split the file
+                utils.v_print(
+                    self.verbose,
+                    "({}/{}) splitting file with {} samples into {} and {}".format(
+                        count, size, len(X), count - size, len(X) - count + size
+                    ),
+                )
+                utils.to_pickle(
+                    (X[: size - count], y[: size - count]),
+                    os.path.join(target_path, current_file[:-4] + "_0.pkl"),
+                )
+                utils.to_pickle(
+                    (X[size - count :], y[size - count :]),
+                    os.path.join(raw_path, current_file[:-4] + "_1.pkl"),
+                )
+                break
+            else:
+                utils.v_print(
+                    self.verbose,
+                    "({}/{}) moving file with {} samples into '{}'".format(
+                        count, size, len(X), target
+                    ),
+                )
+                os.rename(
+                    os.path.join(raw_path, current_file),
+                    os.path.join(target_path, current_file),
+                )
+                if count == size:
+                    break
 
     def __iter__(self):
         self._iterator = iter(self._elements)
@@ -185,7 +433,7 @@ class ParamSet:
         Returns:
             (Group): the next group that has been created under this parameter set.
         """
-        return Group(os.path.join(self.path, next(self._iterator)))
+        return Group(os.path.join(self.path, next(self._iterator)), self.verbose)
 
     def __getitem__(self, idx):
         """Allow access by name of Group."""
@@ -197,21 +445,30 @@ class ParamSet:
             raise IndexError(
                 "no such group found: {}".format(os.path.join(self.path, idx))
             )
-        return Group(os.path.join(self.path, idx))
+        return Group(os.path.join(self.path, idx), self.verbose)
+
+    def __contains__(self, item):
+        return item in self._elements
 
 
 class Dataset:
     """Represents a dataset with all its parameter sets beneath it."""
 
-    def __init__(self, cache_path):
+    def __init__(self, cache_path, verbose=False):
         """Store the path to the dataset to allow access to child ParamSets.
 
         Args:
             cache_path (str): path to dataset; should be a subdirectory of the cache
                               directory.
+            verbose (bool): whether to print debug statements.
         """
         self.path = cache_path
         self.name = os.path.basename(os.path.normpath(cache_path))
+        self.verbose = verbose
+        utils.v_print(verbose, "creating new Dataset object with")
+        utils.v_print(verbose, "  path '{}'".format(self.path))
+        utils.v_print(verbose, "  and name '{}'".format(self.name))
+
         self._iterator = None
         self._elements = list(sorted(os.listdir(self.path)))
 
@@ -225,12 +482,12 @@ class Dataset:
         Returns:
             (ParamSet): the next parameter set that has been generated for this dataset.
         """
-        return ParamSet(os.path.join(self.path, next(self._iterator)))
+        return ParamSet(os.path.join(self.path, next(self._iterator)), self.verbose)
 
     def __getitem__(self, idx):
         """Access either by name of ParamSet or by index."""
         if isinstance(idx, int):
-            return ParamSet(os.path.join(self.path, self._elements[idx]))
+            return ParamSet(os.path.join(self.path, self._elements[idx]), self.verbose)
         if isinstance(idx, str):
             if idx not in self._elements:
                 raise ValueError(
@@ -238,7 +495,7 @@ class Dataset:
                         os.path.join(self.path, idx)
                     )
                 )
-            return ParamSet(os.path.join(self.path, idx))
+            return ParamSet(os.path.join(self.path, idx), self.verbose)
         raise IndexError(
             "ParamSet access is only permitted with int or str; got {}".format(
                 type(idx)
@@ -249,9 +506,18 @@ class Dataset:
 class Cache:
     """Represents a cache location and all of its datasets."""
 
-    def __init__(self):
-        """For now, the cache location is constant."""
+    def __init__(self, verbose=False):
+        """For now, the cache location is constant.
+
+        Args:
+            verbose (bool): whether to print debug statements.
+        """
         self.path = utils.get_cache_dir()
+        self.verbose = verbose
+        utils.v_print(
+            verbose, "creating new Cache object with path '{}'".format(self.path)
+        )
+
         self._iterator = None
         self._elements = list(
             sorted(item for item in os.listdir(self.path) if not item.startswith("."))
@@ -267,18 +533,18 @@ class Cache:
         Returns:
             (Dataset): the next dataset in the cache.
         """
-        return Dataset(os.path.join(self.path, next(self._iterator)))
+        return Dataset(os.path.join(self.path, next(self._iterator)), self.verbose)
 
     def __getitem__(self, idx):
         """Access either by name of Dataset or by index."""
         if isinstance(idx, int):
-            return Dataset(os.path.join(self.path, self._elements[idx]))
+            return Dataset(os.path.join(self.path, self._elements[idx]), self.verbose)
         if isinstance(idx, str):
             if idx not in self._elements:
                 raise ValueError(
                     "no such dataset found: {}".format(os.path.join(self.path, idx))
                 )
-            return Dataset(os.path.join(self.path, idx))
+            return Dataset(os.path.join(self.path, idx), self.verbose)
         raise IndexError(
             "Dataset access is only permitted with int or str; got {}".format(type(idx))
         )

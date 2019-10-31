@@ -21,8 +21,37 @@ import subprocess
 import sys
 
 from slurm_gen import datasets, utils
+from slurm_gen.data_objects import Cache
 
-# the base string for submitting a data generation job
+
+def _remove_metadata(dataset, params):
+    """Invalidate any record of the number of raw samples for the dataset and param set.
+
+    Args:
+        dataset (str): name of dataset.
+        params (dict): parameter dict for generating function.
+    """
+    param_str = getattr(datasets, dataset).paramClass(**params)._to_string()
+    os.remove(os.path.join(Cache()[dataset][param_str], "raw", ".metadata"))
+
+
+def _generate_here(dataset, size, params):
+    """Using the current process, generate `size` samples of the dataset, using the
+    generation function defined in datasets.py.
+
+    Args:
+        dataset (str): name of dataset to generate. Must match a function retrieved by
+                       get_dataset.
+        size (int): number of samples to generate.
+        params (dict): parameter dict to pass to generating function.
+    """
+    _remove_metadata(dataset, params)
+
+    # generate the data
+    getattr(datasets, dataset)(size, params)
+
+
+# the base string for submitting a data generation job to SLURM
 raw_SLURM = (
     """echo '#!/bin/bash
 
@@ -104,19 +133,6 @@ def create_SLURM_command(dataset, size, params, SLURM_out, options):
     return command
 
 
-def _generate_here(dataset, size, params):
-    """Using the current process, generate `size` samples of the dataset, using the
-    generation function defined in datasets.py.
-
-    Args:
-        dataset (str): name of dataset to generate. Must match a function retrieved by
-                       get_dataset.
-        size (int): number of samples to generate.
-        params (dict): parameter dict to pass to generating function.
-    """
-    getattr(datasets, dataset)(size, params)
-
-
 def _generate_with_SLURM(dataset, size, params, options, njobs=1, verbose=False):
     """Using SLURM, generate `size` samples of the dataset, using the generation
     function defined in datasets.py.
@@ -131,6 +147,8 @@ def _generate_with_SLURM(dataset, size, params, options, njobs=1, verbose=False)
         njobs (int): number of SLURM jobs to use to generate the data.
         verbose (bool): whether to print the bash commands issued.
     """
+    _remove_metadata(dataset, params)
+
     SLURM_out = utils.get_SLURM_output_dir()
 
     for nsamples in utils.samples_to_jobs(size, njobs):
