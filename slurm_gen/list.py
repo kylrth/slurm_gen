@@ -6,6 +6,7 @@ Kyle Roth. 2019-10-30.
 """
 
 
+import argparse
 import sys
 
 from slurm_gen.data_objects import Cache
@@ -32,13 +33,10 @@ def print_sizes(param_set):
     # collect strings of counts
     count_strings = [" raw: {}".format(param_set.raw_size)]
     for group in param_set:
-        count_strings.append(
-            " {}: unprocessed({})".format(group.name, group.unprocessed_size)
-        )
+        count_strings.append(" {}: unprocessed({})".format(group.name, group.unprocessed_size))
         for preproc_set in group:
             count_strings.append(
-                " " * (len(group.name) + 1)
-                + ": {}({})".format(preproc_set.name, len(preproc_set))
+                " " * (len(group.name) + 1) + ": {}({})".format(preproc_set.name, preproc_set.size)
             )
 
     # print the param and count strings next to each other
@@ -84,18 +82,19 @@ def single_list(dataset):
         count += 1
 
 
-def _list(dataset=None):
+def _list(dataset=None, verbose=False):
     """List the datasets along with the number of samples generated for them.
 
     Args:
         dataset (str): if given, list only the number of samples for this dataset.
+        verbose (bool): whether to print debug statements.
     """
     if dataset is None:
         # list all of them!
         divider = "-" * 80 + "\n"
         did_print = False
 
-        for d_set in Cache():
+        for d_set in Cache(verbose):
             if did_print:
                 print(divider)
             print("{}:".format(d_set.name))
@@ -106,13 +105,23 @@ def _list(dataset=None):
             print("No datasets found. Generate one!")
     else:
         # get list the one dataset
-        single_list(Cache()[dataset])
+        single_list(Cache(verbose)[dataset])
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 2:
-        print("Usage: python -m slurm_gen.list [DATASET]")
-    elif len(sys.argv) == 2:
-        _list(sys.argv[1])
-    else:
-        _list()
+    parser = argparse.ArgumentParser(
+        description="command line interface for listing samples in the cache",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument("dataset", nargs="?", help="dataset for which to list quantities")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="print debug info while running the command"
+    )
+
+    args = parser.parse_args()
+
+    try:
+        _list(args.dataset, args.verbose)
+    except KeyboardInterrupt:
+        print("\nexiting")

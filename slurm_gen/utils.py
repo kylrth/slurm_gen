@@ -9,6 +9,9 @@ import os
 import pickle
 import time
 
+from slurm_gen import datasets
+from slurm_gen.data_objects import ParamSet
+
 
 def v_print(verbose, s):
     """If verbose is True, print the string, prepending with the current timestamp.
@@ -20,9 +23,7 @@ def v_print(verbose, s):
     """
     if verbose:
         print(
-            "{:.6f}: ({}) {}".format(
-                time.time(), inspect.currentframe().f_back.f_code.co_name, s
-            )
+            "{:.6f}: ({}) {}".format(time.time(), inspect.currentframe().f_back.f_code.co_name, s)
         )
 
 
@@ -53,10 +54,10 @@ def from_pickle(filepath, verbose=False):
     try:
         with open(filepath, "rb") as f:
             out = pickle.load(f)
-        v_print(verbose, "Cache file successfully loaded.")
+        v_print(verbose, "successfully read pickled object from '{}'".format(filepath))
         return out
     except (EOFError, pickle.UnpicklingError):
-        v_print(verbose, "Cache file corrupt; deleting.")
+        v_print(verbose, "Cache file corrupt; deleting '{}'".format(filepath))
         os.remove(filepath)
         return [], []
 
@@ -76,55 +77,20 @@ class InsufficientSamplesError(Exception):
             verbose (bool): print debugging statements to stdout.
         """
         self.needed = size
-        times = self._get_times(dataset_path, verbose)
-        if times:
-            est_time = self.s_to_clock(size * sum(times) / len(times))
+        try:
+            dataset = os.path.basename(os.path.dirname(os.path.normpath(dataset_path)))
+            cache_every = getattr(datasets, dataset).cache_every
+            time_per_sample = ParamSet(dataset_path, verbose).time_per_save / cache_every  # TODO
+            est_time = self.s_to_clock(size * time_per_sample)
             super(InsufficientSamplesError, self).__init__(
-                "{} samples need to be generated (estimated time {})".format(
-                    size, est_time
-                )
+                "{} samples need to be generated (estimated time {})".format(size, est_time)
             )
-        else:
+        except FileNotFoundError:
             # no times have been recorded yet
             super(InsufficientSamplesError, self).__init__(
                 "{} samples need to be generated;"
                 " generate a small number first to estimate time".format(size)
             )
-
-    @staticmethod
-    def _get_times(dp, verbose=False):
-        """Get the recorded times for previous data generation.
-
-        Also compile the times into a single file so it's faster next time.
-
-        Args:
-            dp (str): path to the dataset, including params but not the set name.
-            verbose (bool): print debugging statements to stdout.
-        Returns:
-            list(float): the collected times, in seconds.
-        """
-        times = []
-        os.makedirs(os.path.join(dp, ".times"), exist_ok=True)
-        for fp in glob(os.path.join(dp, ".times", "*.time")):
-            with open(fp, "r") as infile:
-                times.extend(infile.read().strip().split())
-            os.remove(fp)
-        v_print(
-            verbose,
-            'Collected {} timings from "{}".'.format(
-                len(times), os.path.join(dp, ".times")
-            ),
-        )
-
-        # store in a single file
-        with open(os.path.join(dp, ".times", "compiled.time"), "w") as outfile:
-            outfile.writelines([time + "\n" for time in times])
-        v_print(
-            verbose,
-            'Wrote timings to "{}"'.format(os.path.join(dp, ".times", "compiled.time")),
-        )
-
-        return [float(time) for time in times]
 
     @staticmethod
     def s_to_clock(s):
@@ -155,11 +121,15 @@ class DefaultParamObject:
         Args:
             kwargs: parameter values to replace defaults.
         """
+        # get the set of class attributes
+        attrs = inspect.getmembers(self.__class__, lambda a: not (inspect.isroutine(a)))
+        attrs = {a[0] for a in attrs if not (a[0].startswith("__") and a[0].endswith("__"))}
+
         # ensure all kwargs are class attributes
-        if not set(kwargs.keys()).issubset(self.__dict__):
+        if not set(kwargs.keys()).issubset(attrs):
             raise AttributeError(
                 "the following parameters are not attributes of {}: {}".format(
-                    type(self).__name__, set(kwargs.keys()) - set(self.__dict__)
+                    type(self).__name__, set(kwargs.keys()) - attrs
                 )
             )
         self.__dict__.update(kwargs)
@@ -213,9 +183,7 @@ def get_cache_dir():
     Returns:
         (str): the absolute path.
     """
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cache"
-    )
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cache")
 
 
 def get_dataset_dir(name, params):
@@ -347,6 +315,33 @@ def clock_to_seconds(s):
         raise ValueError('clock string has bad formatting: "{}"'.format(s))
 
 
+def get_samples(path, size, verbose=False):
+    """Get `size` samples from pickle files in the path.
+
+    Pickle files end with ".pkl".
+
+    Args:
+        path (str): directory containing pickle files.
+        size (int): number of samples to retrieve.
+        verbose (bool): whether to print debug statements.
+    Returns:
+        tuple(list, list): samples from path.
+    Throws:
+        FileNotFoundError: not enough samples were found in the directory.
+    """
+    X, y = [], []
+    for name in os.listdir(path):
+        full_name = os.path.join(path, name)
+        if name.endswith(".pkl") and os.path.isfile(full_name):
+            temp_X, temp_y = from_pickle(full_name, verbose)
+            X.extend(temp_X)
+            y.extend(temp_y)
+            if len(X) >= size:
+                return X[:size], y[:size]
+
+    raise FileNotFoundError("not enough samples found in path '{}'".format(path))
+
+
 def count_samples(path, verbose=False):
     """Count the number of samples in all the pickle files in the path.
 
@@ -355,6 +350,8 @@ def count_samples(path, verbose=False):
     Args:
         path (str): directory containing pickle files.
         verbose (bool): whether to print debug statements.
+    Returns:
+        (int): the number of samples in the path.
     """
     count = 0
     for name in os.listdir(path):
@@ -415,9 +412,7 @@ def get_count(path, verbose=False):
                 v_print(verbose, "Count is now {}".format(count))
 
         # save the count for next time
-        v_print(
-            verbose, 'Writing count to "{}"'.format(os.path.join(path, ".metadata"))
-        )
+        v_print(verbose, 'Writing count to "{}"'.format(os.path.join(path, ".metadata")))
         with open(os.path.join(path, ".metadata"), "w+") as metadata:
             metadata.write("size: {}\n".format(count))
     else:
@@ -429,9 +424,7 @@ def get_count(path, verbose=False):
                 v_print(verbose, "Count is now {}".format(count))
 
         # save the count for next time
-        v_print(
-            verbose, 'Writing count to "{}"'.format(os.path.join(path, ".metadata"))
-        )
+        v_print(verbose, 'Writing count to "{}"'.format(os.path.join(path, ".metadata")))
         with open(os.path.join(path, ".metadata"), "w+") as metadata:
             for set_name in count:
                 metadata.write('size "{}": {}\n'.format(set_name, count[set_name]))

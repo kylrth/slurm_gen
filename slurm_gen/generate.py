@@ -16,6 +16,7 @@ Kyle Roth. 2019-05-27.
 
 
 import argparse
+import ast
 import os
 import subprocess
 import sys
@@ -32,7 +33,10 @@ def _remove_metadata(dataset, params):
         params (dict): parameter dict for generating function.
     """
     param_str = getattr(datasets, dataset).paramClass(**params)._to_string()
-    os.remove(os.path.join(Cache()[dataset][param_str], "raw", ".metadata"))
+    try:
+        os.remove(os.path.join(utils.get_cache_dir(), dataset, param_str, "raw", ".metadata"))
+    except FileNotFoundError:
+        pass
 
 
 def _generate_here(dataset, size, params):
@@ -40,8 +44,7 @@ def _generate_here(dataset, size, params):
     generation function defined in datasets.py.
 
     Args:
-        dataset (str): name of dataset to generate. Must match a function retrieved by
-                       get_dataset.
+        dataset (str): name of dataset to generate. Must match a function retrieved by get_dataset.
         size (int): number of samples to generate.
         params (dict): parameter dict to pass to generating function.
     """
@@ -72,32 +75,29 @@ def create_SLURM_command(dataset, size, params, SLURM_out, options):
     """Create the SLURM command that will generate the requested number of samples.
 
     Args:
-        dataset (str): name of dataset to generate. Must match a function from the
-                       data_gen module.
+        dataset (str): name of dataset to generate. Must match a function from the data_gen module.
         size (int): number of samples to generate.
-        params (dict): parameter dict to pass to generating function. Must be
-                       reconstructable from repr(params).
+        params (dict): parameter dict to pass to generating function. Must be reconstructable from
+                       ast.literal_eval.
         SLURM_out (str): path to SLURM output directory.
         options: Object providing SLURM options in the following attributes:
                  - mem_per_cpu: memory to assign to each CPU in a SLURM job, e.g. "2GB".
-                 - time: time for each job to run. Acceptable time formats include "MM",
-                         "MM:SS", "HH:MM:SS", "D-HH", "D-HH:MM" and "D-HH:MM:SS". If
-                         None, the third standard deviation above the mean of previous
-                         runs is used (adapted to the number of samples per job).
+                 - time: time for each job to run. Acceptable time formats include "MM", "MM:SS",
+                         "HH:MM:SS", "D-HH", "D-HH:MM" and "D-HH:MM:SS". If None, the second
+                         standard deviation above the mean of previous runs is used (adapted to the
+                         number of samples per job).
                  - cpus_per_task: number of CPUs per SLURM task.
                  - name: name for each SLURM task.
                  - ntasks: number of tasks to assign to this job.
                  - test: mark SLURM submissions with "--qos=test".
-                 - preemptable: mark SLURM submissions with "--qos=standby", allowing
-                                preemption of the jobs.
+                 - preemptable: mark SLURM submissions with "--qos=standby", allowing preemption of
+                                the jobs.
                  - GPUs: specify the number of GPUs to allocate to each job.
     Returns:
         (str): viable bash command to submit SLURM job.
     """
     if options.test and utils.clock_to_seconds(options.time) > 3600:
-        raise ValueError(
-            "tests may not have a run time greater than 60 minutes on SLURM"
-        )
+        raise ValueError("tests may not have a run time greater than 60 minutes on SLURM")
 
     # insert options into command string
     command = raw_SLURM.format(
@@ -138,12 +138,11 @@ def _generate_with_SLURM(dataset, size, params, options, njobs=1, verbose=False)
     function defined in datasets.py.
 
     Args:
-        dataset (str): name of dataset to generate. Must match a function retrieved by
-                       get_dataset.
+        dataset (str): name of dataset to generate. Must match a function retrieved by get_dataset.
         size (int): number of samples to generate.
         params (dict): parameter dict to pass to generating function.
-        options: object containing SLURM options as attributes. Required attributes are
-                 listed in the docstring for create_SLURM_command.
+        options: object containing SLURM options as attributes. Required attributes are listed in
+                        the docstring for create_SLURM_command.
         njobs (int): number of SLURM jobs to use to generate the data.
         verbose (bool): whether to print the bash commands issued.
     """
@@ -151,12 +150,33 @@ def _generate_with_SLURM(dataset, size, params, options, njobs=1, verbose=False)
 
     SLURM_out = utils.get_SLURM_output_dir()
 
+    per_sample = None
+    if options.time is None:
+        # use the second deviation above the mean generating time
+
+        paramObject = getattr(datasets, dataset).paramClass(**params)
+        try:
+            per_save = Cache(verbose)[dataset][paramObject._to_string()].time_per_save
+        except FileNotFoundError:
+            raise argparse.ArgumentError(
+                "no time data is stored for this dataset; --time must be provided"
+            )
+        utils.v_print(verbose, "two standard deviations above the mean is {}s".format(per_save))
+
+        per_sample = per_save / getattr(datasets, dataset).cache_every
+        utils.v_print(verbose, "\tper sample: {}s".format(per_sample))
+
     for nsamples in utils.samples_to_jobs(size, njobs):
         # nsamples is the number of samples each job should generate
+
+        if per_sample is not None:
+            # set the amount of time for this job depending on the number of samples
+            # round up to the next minute
+            options.time = int(per_sample * nsamples / 60) + 1
+
         command = create_SLURM_command(dataset, nsamples, params, SLURM_out, options)
-        if verbose:
-            print("Submitting the following job:")
-            print(command)
+        utils.v_print(verbose, "Submitting the following job:")
+        utils.v_print(verbose, command)
 
         process = subprocess.run(
             command,
@@ -194,15 +214,12 @@ if __name__ == "__main__":
 
     # required arguments
     parser.add_argument("dataset", help="dataset for which to generate samples")
-    parser.add_argument(
-        "-n", type=int, required=True, help="number of data points to generate"
-    )
+    parser.add_argument("-n", type=int, required=True, help="number of data points to generate")
     parser.add_argument(
         "--njobs",
         type=int,
         required="--this_node" not in sys.argv,  # only require if submitting to SLURM
-        help="number of SLURM jobs to submit. "
-        "Each job will produce about n/njobs samples",
+        help="number of SLURM jobs to submit. " "Each job will produce about n/njobs samples",
     )
     parser.add_argument(
         "--mem_per_cpu",
@@ -215,40 +232,28 @@ if __name__ == "__main__":
     parser.add_argument(
         "--this_node",
         action="store_true",
-        help="run the data-generating code in this process, instead of submitting it "
-        "to SLURM. This ignores all SLURM options.",
-    )
-    parser.add_argument(
-        "-l",
-        "--at_least",
-        action="store_true",
-        help="simply ensure that n data points are present, "
-        "generating more if necessary",
+        help="run the data-generating code in this process, instead of submitting it to SLURM. "
+        "This ignores all SLURM options.",
     )
     parser.add_argument(
         "-p",
         "--params",
-        type=str,
+        type=ast.literal_eval,
         default={},
-        help="dict to be passed as params to the data generator. Use --describe to "
-        "view the docstring for the generating function, which may describe possible "
-        "keys and values for params.",
+        help="dict to be passed as params to the data generator.",
     )
     parser.add_argument(
         "-t",
         "--time",
         type=str,
-        help='time for each job to run. Acceptable time formats include "MM", "MM:SS", '
-        '"HH:MM:SS", "D-HH", "D-HH:MM" and "D-HH:MM:SS". If not provided, the third '
-        "standard deviation above the mean of previous runs is used (adapted to the "
-        "number of samples per job).",
+        help='time for each job to run. Acceptable time formats include "MM", "MM:SS", "HH:MM:SS", '
+        '"D-HH", "D-HH:MM" and "D-HH:MM:SS". If not provided, the second standard deviation above '
+        "the mean of previous runs is used (adapted to the number of samples per job).",
     )
     parser.add_argument(
         "--cpus_per_task", type=int, default=1, help="number of CPUs per SLURM task"
     )
-    parser.add_argument(
-        "--name", type=str, default="data gen", help="name for each SLURM task"
-    )
+    parser.add_argument("--name", type=str, default="data gen", help="name for each SLURM task")
     parser.add_argument(
         "--ntasks", type=int, default=1, help="number of tasks to assign to this job"
     )
@@ -261,10 +266,7 @@ if __name__ == "__main__":
         "--test", action="store_true", help='mark SLURM submissions with "--qos=test"'
     )
     parser.add_argument(
-        "--GPUs",
-        type=int,
-        default=0,
-        help="specify the number of GPUs to allocate to each job",
+        "--GPUs", type=int, default=0, help="specify the number of GPUs to allocate to each job"
     )
 
     parser.add_argument(

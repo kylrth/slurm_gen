@@ -7,6 +7,7 @@ Kyle Roth. 2019-08-05.
 
 
 import os
+import statistics
 
 from slurm_gen import utils
 
@@ -30,8 +31,6 @@ class PreprocessedData:
         utils.v_print(verbose, "  path '{}'".format(self.path))
         utils.v_print(verbose, "  and name '{}'".format(self.name))
 
-        self._size = None
-
     @property
     def size(self):
         """The size of the preprocessed set of data.
@@ -39,16 +38,13 @@ class PreprocessedData:
         Returns:
             (int)
         """
-        if self._size is not None:
-            return self._size
-
         # try to read it from the metadata file
         metadata_path = os.path.join(self.path, ".metadata")
         if os.path.isfile(metadata_path):
             utils.v_print(self.verbose, "reading size from '{}'".format(metadata_path))
             with open(metadata_path) as infile:
                 for line in infile:
-                    if line.startswith("size: ".format(self.name)):
+                    if line.startswith("size: "):
                         self._size = int(line.split(": ")[1])
                         return self._size
 
@@ -56,25 +52,11 @@ class PreprocessedData:
         self._size = utils.count_samples(self.path, self.verbose)
 
         # store it in the metadata file
-        utils.v_print(
-            self.verbose, "writing size '{}' to '{}'".format(self._size, metadata_path)
-        )
+        utils.v_print(self.verbose, "writing size '{}' to '{}'".format(self._size, metadata_path))
         with open(metadata_path, "a+") as outfile:
-            outfile.write("size: {}\n".format(self.name, self._size))
+            outfile.write("size: {}\n".format(self._size))
 
         return self._size
-
-    @size.setter
-    def size(self, value):
-        """Set a new size, because we know we've preprocessed new samples since we last
-        calculated the size.
-
-        Args:
-            value (int): new size of PreprocessedData.
-        """
-        self._size = value
-        if os.path.exists(os.path.join(self.path, ".metadata")):
-            os.remove(os.path.join(self.path, ".metadata"))
 
     def get(self, size):
         """Return `size` samples from this preprocessed dataset.
@@ -84,28 +66,9 @@ class PreprocessedData:
         Args:
             size (int): number of samples to return.
         Returns:
-            (list): features concatenated from pickle files.
-            (list): labels concatenated from pickle files.
+            tuple(list, list): samples.
         """
-        files = sorted(os.listdir(self.path))
-        X, y = [], []
-
-        while len(X) < size:
-            file = next(files)
-            new_X, new_y = utils.from_pickle(
-                os.path.join(self.path, file), self.verbose
-            )
-            utils.v_print(
-                self.verbose,
-                "({}/{}) read {} samples from '{}'".format(
-                    len(X), size, len(new_X), file
-                ),
-            )
-
-            X.extend(new_X)
-            y.extend(new_y)
-
-        return X[:size], y[:size]
+        return utils.get_samples(self.path, size, self.verbose)
 
 
 class Group:
@@ -128,9 +91,6 @@ class Group:
         utils.v_print(verbose, "  and name '{}'".format(self.name))
 
         self._iterator = None
-        self._elements = {item for item in os.listdir(self.path) if os.path.isdir(item)}
-
-        self._unprocessed_size = None
 
     @property
     def unprocessed_size(self):
@@ -139,9 +99,6 @@ class Group:
         Returns:
             (int)
         """
-        if self._unprocessed_size is not None:
-            return self._unprocessed_size
-
         # try to read it from the metadata file
         metadata_path = os.path.join(self.path, ".metadata")
         if os.path.isfile(metadata_path):
@@ -157,52 +114,36 @@ class Group:
 
         # store it in the metadata file
         utils.v_print(
-            self.verbose,
-            "writing size '{}' to '{}'".format(self._unprocessed_size, metadata_path),
+            self.verbose, "writing size '{}' to '{}'".format(self._unprocessed_size, metadata_path)
         )
         with open(metadata_path, "a+") as outfile:
             outfile.write("size: {}\n".format(self._unprocessed_size))
 
         return self._unprocessed_size
 
-    @staticmethod
-    def _apply_preprocessor(func, X, y, batch_preproc, verbose):
-        """Apply the preprocessor to the data, and return it."""
-        utils.v_print(verbose, "applying preprocessor '{}'.".format(func.__name__))
-        if batch_preproc:
-            utils.v_print(verbose, "    (using batch application)")
-            X, y = func(X, y)
-        else:
-            utils.v_print(verbose, "    (using individual application)")
-            try:
-                X, y = zip(*(func(x, wai) for x, wai in zip(X, y)))
-            except TypeError as e:
-                if str(e).startswith("zip argument #") and str(e).endswith(
-                    " must support iteration"
-                ):
-                    raise TypeError("preprocessor did not return the correct signature")
-                raise
-        return list(X), list(y)
+    def get(self, size):
+        """Get `size` samples from the unprocessed set.
 
-    def assert_preprocessed_size(self, func, size, batch_preproc=False):
-        """Ensure that at least `size` samples have been processed with `func`.
-
-        If batch_preproc is set, the preprocessor must accept a list of data points and
-        a list of corresponding labels. Otherwise, it must accept a single data point
-        and its corresponding label. In either case, it should return preprocessed
-        versions of both data and label.
+        Warning: this data comes in order. You'll probably want to shuffle it.
 
         Args:
-            func (callable): preprocessing function to be applied to data. If
-                             batch_preproc is False, call signature must allow (x, y)
-                             where x is a single data point and y is a label. If
-                             batch_preproc is True, `func` is called on X, y where X is
-                             an iterable of all data points and y is an iterable of all
+            size (int): number of samples to retrieve.
+        Returns:
+            tuple(list, list): samples.
+        """
+        return utils.get_samples(self.path, size, self.verbose)
+
+    def assert_preprocessed_size(self, func, size):
+        """Ensure that at least `size` samples have been processed with `func`.
+
+        The preprocessor must accept a list of data points and a list of corresponding labels. It
+        should return preprocessed versions of both data and label.
+
+        Args:
+            func (callable): preprocessing function to be applied to data. `func` is called on X, y
+                             where X is an iterable of all data points and y is an iterable of all
                              labels.
             size (int): number of samples to preprocess.
-            batch_preproc (bool): if True, `func` is called on the entire dataset at
-                                  once. Otherwise, `func` is called on a single data
-                                  point and label at a time.
         Raises:
             (utils.InsufficientSamplesError): there are not enough unprocessed samples.
         """
@@ -212,14 +153,11 @@ class Group:
             )
 
         # get unprocessed data
-        unproc_files = sorted(
-            file for file in os.listdir(self.path) if file.endswith(".pkl")
-        )
+        unproc_files = sorted(file for file in os.listdir(self.path) if file.endswith(".pkl"))
 
         # make sure the PreprocessedData exists
-        self._elements.add(func.__name__)
+        os.makedirs(os.path.join(self.path, func.__name__), exist_ok=True)
         proc_set = self[func.__name__]
-        os.makedirs(proc_set.path, exist_ok=True)
 
         # get the current size of the PreprocessedData and the individual files which
         # have already been preprocessed
@@ -228,7 +166,7 @@ class Group:
 
         # preprocess files, skipping those that are already preprocessed
         for file in unproc_files:
-            if count > size:
+            if count >= size:
                 break
             if file in current_proc_files:
                 continue
@@ -236,43 +174,19 @@ class Group:
             # preprocess it!
             X, y = utils.from_pickle(os.path.join(self.path, file), self.verbose)
             count += len(X)
-            X, y = self._apply_preprocessor(func, X, y, batch_preproc, self.verbose)
+            X, y = func(X, y)
             utils.to_pickle((X, y), os.path.join(proc_set.path, file))
-            proc_set.size = count
 
-    def get_unprocessed(self, size):
-        """Return `size` samples from the unprocessed dataset.
-
-        Warning: this data comes in order. You'll probably want to shuffle it.
-
-        Args:
-            size (int): number of samples to return.
-        Returns:
-            (list): features concatenated from pickle files.
-            (list): labels concatenated from pickle files.
-        """
-        files = sorted(os.listdir(self.path))
-        X, y = [], []
-
-        while len(X) < size:
-            file = next(files)
-            new_X, new_y = utils.from_pickle(
-                os.path.join(self.path, file), self.verbose
-            )
-            utils.v_print(
-                self.verbose,
-                "({}/{}) read {} samples from '{}'".format(
-                    len(X), size, len(new_X), file
-                ),
-            )
-
-            X.extend(new_X)
-            y.extend(new_y)
-
-        return X[:size], y[:size]
+        # invalidate the metadata file
+        try:
+            os.remove(os.path.join(proc_set.path, ".metadata"))
+        except FileNotFoundError:
+            pass
 
     def __iter__(self):
-        self._iterator = iter(self._elements)
+        self._iterator = iter(
+            {item for item in os.listdir(self.path) if os.path.isdir(os.path.join(self.path, item))}
+        )
         return self
 
     def __next__(self):
@@ -282,19 +196,18 @@ class Group:
             (PreprocessedData): the next preprocessed data that has been created under
                                 this group.
         """
-        return PreprocessedData(
-            os.path.join(self.path, next(self._iterator)), self.verbose
-        )
+        return PreprocessedData(os.path.join(self.path, next(self._iterator)), self.verbose)
 
     def __getitem__(self, idx):
         """Allow access by name of PreprocessedData."""
         if not isinstance(idx, str):
             raise IndexError(
-                "Group access is only permitted by str; got {}".format(type(idx))
+                "Preprocessed set access is only permitted by str; got {}".format(type(idx))
             )
-        if idx not in self._elements:
+        elements = os.listdir(self.path)
+        if not os.path.isdir(os.path.join(self.path, idx)) or idx not in elements:
             raise IndexError(
-                "no such group found: {}".format(os.path.join(self.path, idx))
+                "no such preprocessed set found: {}".format(os.path.join(self.path, idx))
             )
         return PreprocessedData(os.path.join(self.path, idx), self.verbose)
 
@@ -318,13 +231,6 @@ class ParamSet:
         utils.v_print(verbose, "  and name '{}'".format(self.name))
 
         self._iterator = None
-        self._elements = {
-            item
-            for item in os.listdir(self.path)
-            if not item.startswith(".") and item != "raw"
-        }
-
-        self._raw_size = None
 
     @property
     def raw_size(self):
@@ -333,15 +239,10 @@ class ParamSet:
         Returns:
             (int)
         """
-        if self._raw_size is not None:
-            return self._raw_size
-
         # try to read it from the metadata file
         raw_metadata_path = os.path.join(self.path, "raw", ".metadata")
         if os.path.isfile(raw_metadata_path):
-            utils.v_print(
-                self.verbose, "reading size from '{}'".format(raw_metadata_path)
-            )
+            utils.v_print(self.verbose, "reading size from '{}'".format(raw_metadata_path))
             with open(raw_metadata_path) as infile:
                 for line in infile:
                     if line.startswith("size: "):
@@ -349,19 +250,29 @@ class ParamSet:
                         return self._raw_size
 
         # count the number by hand
-        self._raw_size = utils.count_samples(
-            os.path.join(self.path, "raw"), self.verbose
-        )
+        self._raw_size = utils.count_samples(os.path.join(self.path, "raw"), self.verbose)
 
         # store it in the metadata file
         utils.v_print(
-            self.verbose,
-            "writing size '{}' to '{}'".format(self._raw_size, raw_metadata_path),
+            self.verbose, "writing size '{}' to '{}'".format(self._raw_size, raw_metadata_path)
         )
         with open(raw_metadata_path, "w+") as outfile:
             outfile.write("size: {}\n".format(self._raw_size))
 
         return self._raw_size
+
+    @property
+    def time_per_save(self):
+        """Two standard deviations above the mean amount of time it takes to generate `cache_every`
+        samples.
+        """
+        times = []
+        for file in os.listdir(os.path.join(self.path, "raw", ".times")):
+            with open(os.path.join(self.path, "raw", ".times", file), "r") as timefile:
+                for line in timefile:
+                    times.append(float(line[:-1]))  # trailing newline
+
+        return statistics.mean(times) + 2 * statistics.stdev(times)
 
     def move(self, target, size):
         """Move `size` raw samples to the group named `target`.
@@ -376,7 +287,7 @@ class ParamSet:
         if size > self.raw_size:
             raise utils.InsufficientSamplesError(size - self.raw_size, self.path)
 
-        self._elements.add(target)
+        # make sure the group exists
         os.makedirs(os.path.join(self.path, target), exist_ok=True)
 
         # source and destination paths
@@ -385,7 +296,7 @@ class ParamSet:
         utils.v_print(self.verbose, "source path: '{}'".format(raw_path))
         utils.v_print(self.verbose, "target path: '{}'".format(target_path))
 
-        files = iter(os.listdir(raw_path))
+        files = iter(file for file in os.listdir(raw_path) if not file.startswith("."))
 
         count = 0
         while True:
@@ -417,14 +328,25 @@ class ParamSet:
                     ),
                 )
                 os.rename(
-                    os.path.join(raw_path, current_file),
-                    os.path.join(target_path, current_file),
+                    os.path.join(raw_path, current_file), os.path.join(target_path, current_file)
                 )
                 if count == size:
                     break
 
+        # invalidate the metadata files
+        try:
+            os.remove(os.path.join(self.path, "raw", ".metadata"))
+        except FileNotFoundError:
+            pass
+        try:
+            os.remove(os.path.join(self.path, target, ".metadata"))
+        except FileNotFoundError:
+            pass
+
     def __iter__(self):
-        self._iterator = iter(self._elements)
+        self._iterator = iter(
+            {item for item in os.listdir(self.path) if not item.startswith(".") and item != "raw"}
+        )
         return self
 
     def __next__(self):
@@ -438,17 +360,17 @@ class ParamSet:
     def __getitem__(self, idx):
         """Allow access by name of Group."""
         if not isinstance(idx, str):
-            raise IndexError(
-                "Group access is only permitted by str; got {}".format(type(idx))
-            )
-        if idx not in self._elements:
-            raise IndexError(
-                "no such group found: {}".format(os.path.join(self.path, idx))
-            )
+            raise IndexError("Group access is only permitted by str; got {}".format(type(idx)))
+
+        if idx.startswith(".") or idx == "raw":
+            raise IndexError("no such group found: {}".format(os.path.join(self.path, idx)))
+        if idx not in os.listdir(self.path):
+            raise IndexError("no such group found: {}".format(os.path.join(self.path, idx)))
+
         return Group(os.path.join(self.path, idx), self.verbose)
 
     def __contains__(self, item):
-        return item in self._elements
+        return not item.startswith(".") and item != "raw" and item in os.listdir(self.path)
 
 
 class Dataset:
@@ -470,10 +392,9 @@ class Dataset:
         utils.v_print(verbose, "  and name '{}'".format(self.name))
 
         self._iterator = None
-        self._elements = list(sorted(os.listdir(self.path)))
 
     def __iter__(self):
-        self._iterator = iter(self._elements)
+        self._iterator = iter(sorted(os.listdir(self.path)))
         return self
 
     def __next__(self):
@@ -486,20 +407,17 @@ class Dataset:
 
     def __getitem__(self, idx):
         """Access either by name of ParamSet or by index."""
+        elements = list(sorted(os.listdir(self.path)))
         if isinstance(idx, int):
-            return ParamSet(os.path.join(self.path, self._elements[idx]), self.verbose)
+            return ParamSet(os.path.join(self.path, elements[idx]), self.verbose)
         if isinstance(idx, str):
-            if idx not in self._elements:
+            if idx not in elements:
                 raise ValueError(
-                    "no such parameter set found: {}".format(
-                        os.path.join(self.path, idx)
-                    )
+                    "no such parameter set found: {}".format(os.path.join(self.path, idx))
                 )
             return ParamSet(os.path.join(self.path, idx), self.verbose)
         raise IndexError(
-            "ParamSet access is only permitted with int or str; got {}".format(
-                type(idx)
-            )
+            "ParamSet access is only permitted with int or str; got {}".format(type(idx))
         )
 
 
@@ -514,17 +432,14 @@ class Cache:
         """
         self.path = utils.get_cache_dir()
         self.verbose = verbose
-        utils.v_print(
-            verbose, "creating new Cache object with path '{}'".format(self.path)
-        )
+        utils.v_print(verbose, "creating new Cache object with path '{}'".format(self.path))
 
         self._iterator = None
-        self._elements = list(
-            sorted(item for item in os.listdir(self.path) if not item.startswith("."))
-        )
 
     def __iter__(self):
-        self._iterator = iter(self._elements)
+        self._iterator = iter(
+            sorted(item for item in os.listdir(self.path) if not item.startswith("."))
+        )
         return self
 
     def __next__(self):
@@ -537,13 +452,12 @@ class Cache:
 
     def __getitem__(self, idx):
         """Access either by name of Dataset or by index."""
+        elements = list(sorted(item for item in os.listdir(self.path) if not item.startswith(".")))
         if isinstance(idx, int):
-            return Dataset(os.path.join(self.path, self._elements[idx]), self.verbose)
+            return Dataset(os.path.join(self.path, elements[idx]), self.verbose)
         if isinstance(idx, str):
-            if idx not in self._elements:
-                raise ValueError(
-                    "no such dataset found: {}".format(os.path.join(self.path, idx))
-                )
+            if idx not in elements:
+                raise ValueError("no such dataset found: {}".format(os.path.join(self.path, idx)))
             return Dataset(os.path.join(self.path, idx), self.verbose)
         raise IndexError(
             "Dataset access is only permitted with int or str; got {}".format(type(idx))

@@ -65,9 +65,8 @@ def generator(cache_every, ParamClass):
 
             # cache it in the raw location
             dataset_dir = utils.get_dataset_dir(fn_name, params)
-            raw_path = os.path.join(
-                dataset_dir, "raw/{}_{{}}.pkl".format(utils.get_unique_filename())
-            )
+            unique_name = utils.get_unique_filename()
+            raw_path = os.path.join(dataset_dir, "raw/{}_{{}}.pkl".format(unique_name))
             print("Output path:", raw_path)
             os.makedirs(os.path.dirname(raw_path), exist_ok=True)
 
@@ -78,9 +77,7 @@ def generator(cache_every, ParamClass):
             to_store_y = []
 
             # create a file to store times
-            time_file = os.path.join(dataset_dir, ".times/{}.time").format(
-                utils.get_unique_filename()
-            )
+            time_file = os.path.join(dataset_dir, "raw", ".times", "{}.time").format(unique_name)
             os.makedirs(os.path.dirname(time_file), exist_ok=True)
 
             with open(time_file, "a+") as time_f:
@@ -92,10 +89,10 @@ def generator(cache_every, ParamClass):
                         x, y = next(iter_data)
                     except StopIteration:
                         # store everything left over
-                        with open(
-                            raw_path.format(data_count // cache_every + 1), "wb"
-                        ) as outfile:
-                            pickle.dump((to_store_x, to_store_y), outfile)
+                        if to_store_x:
+                            with open(raw_path.format(data_count // cache_every + 1), "wb") as pkl:
+                                pickle.dump((to_store_x, to_store_y), pkl)
+                            time_f.write(str((time() - start) / cache_every) + "\n")
                         break
 
                     # add it to the temporary list
@@ -105,16 +102,20 @@ def generator(cache_every, ParamClass):
 
                     # store it every `cache_every` iterations
                     if not data_count % cache_every:
-                        with open(
-                            raw_path.format(data_count // cache_every), "wb"
-                        ) as outfile:
-                            pickle.dump((to_store_x, to_store_y), outfile)
+                        with open(raw_path.format(data_count // cache_every), "wb") as pkl:
+                            pickle.dump((to_store_x, to_store_y), pkl)
 
-                    # record the time spent
-                    time_f.write(str(time() - start) + "\n")
+                        to_store_x.clear()
+                        to_store_y.clear()
 
-        # store the class used by this function, for use in data_loading.get_data
+                        # record the average time spent
+                        time_f.write(str((time() - start) / cache_every) + "\n")
+
+        # store the parameter class used by this function
         wrapper.paramClass = ParamClass
+
+        # store how often the caching happens
+        wrapper.cache_every = cache_every
 
         return wrapper
 
@@ -217,9 +218,7 @@ def test__single_sim(**kwargs):
     kwargs will replace default parameters passed to single_sim.
     """
     # set parameters of the experiment
-    p = WavelengthSweepParams(
-        **kwargs
-    )  # overwrite defaults using parameters passed in.
+    p = WavelengthSweepParams(**kwargs)
 
     for i, thing in enumerate(_single_sim(p)[2][1:]):
         # plot each image and save it to kyle/taper_modeling/figures
