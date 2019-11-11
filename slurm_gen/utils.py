@@ -9,9 +9,6 @@ import os
 import pickle
 import time
 
-from slurm_gen import datasets
-from slurm_gen.data_objects import ParamSet
-
 
 def v_print(verbose, s):
     """If verbose is True, print the string, prepending with the current timestamp.
@@ -60,53 +57,6 @@ def from_pickle(filepath, verbose=False):
         v_print(verbose, "Cache file corrupt; deleting '{}'".format(filepath))
         os.remove(filepath)
         return [], []
-
-
-class InsufficientSamplesError(Exception):
-    """Helpful error messages for determining how much more time is needed to create the
-    requested size of dataset."""
-
-    def __init__(self, size, dataset_path, verbose=False):
-        """Use the size needed to determine how much compute time it will take to
-        generate that many samples.
-
-        Args:
-            size (int): number of samples needed.
-            dataset_path (str): path to the dataset. Should include params but not set
-                                name ('train', 'test').
-            verbose (bool): print debugging statements to stdout.
-        """
-        self.needed = size
-        try:
-            dataset = os.path.basename(os.path.dirname(os.path.normpath(dataset_path)))
-            cache_every = getattr(datasets, dataset).cache_every
-            time_per_sample = ParamSet(dataset_path, verbose).time_per_save / cache_every  # TODO
-            est_time = self.s_to_clock(size * time_per_sample)
-            super(InsufficientSamplesError, self).__init__(
-                "{} samples need to be generated (estimated time {})".format(size, est_time)
-            )
-        except FileNotFoundError:
-            # no times have been recorded yet
-            super(InsufficientSamplesError, self).__init__(
-                "{} samples need to be generated;"
-                " generate a small number first to estimate time".format(size)
-            )
-
-    @staticmethod
-    def s_to_clock(s):
-        """Convert seconds to clock format, rounding up.
-
-        Args:
-            s (float): number of seconds.
-        Returns:
-            (str): clock time in HH:MM:SS format.
-        """
-        s = int(s) + 1
-        h = s // 3600
-        s = s % 3600
-        m = s // 60
-        s = s % 60
-        return "{}:{}:{}".format(str(h).zfill(2), str(m).zfill(2), str(s).zfill(2))
 
 
 class DefaultParamObject:

@@ -9,7 +9,54 @@ Kyle Roth. 2019-08-05.
 import os
 import statistics
 
-from slurm_gen import utils
+from slurm_gen import datasets, utils
+
+
+class InsufficientSamplesError(Exception):
+    """Helpful error messages for determining how much more time is needed to create the
+    requested size of dataset."""
+
+    def __init__(self, size, dataset_path, verbose=False):
+        """Use the size needed to determine how much compute time it will take to
+        generate that many samples.
+
+        Args:
+            size (int): number of samples needed.
+            dataset_path (str): path to the dataset. Should include params but not set
+                                name ('train', 'test').
+            verbose (bool): print debugging statements to stdout.
+        """
+        self.needed = size
+        try:
+            dataset = os.path.basename(os.path.dirname(os.path.normpath(dataset_path)))
+            cache_every = getattr(datasets, dataset).cache_every
+            time_per_sample = ParamSet(dataset_path, verbose).time_per_save / cache_every
+            est_time = self.s_to_clock(size * time_per_sample)
+            super(InsufficientSamplesError, self).__init__(
+                "{} samples need to be generated (estimated time {})".format(size, est_time)
+            )
+        except FileNotFoundError:
+            # no times have been recorded yet
+            super(InsufficientSamplesError, self).__init__(
+                "{} samples need to be generated;"
+                " generate a small number first to estimate time".format(size)
+            )
+
+    @staticmethod
+    def s_to_clock(s):
+        """Convert seconds to clock format, rounding up.
+
+        Args:
+            s (float): number of seconds.
+        Returns:
+            (str): clock time in HH:MM:SS format.
+        """
+        s = int(s) + 1
+        h = s // 3600
+        s = s % 3600
+        m = s // 60
+        s = s % 60
+        return "{}:{}:{}".format(str(h).zfill(2), str(m).zfill(2), str(s).zfill(2))
 
 
 class PreprocessedData:
@@ -45,18 +92,18 @@ class PreprocessedData:
             with open(metadata_path) as infile:
                 for line in infile:
                     if line.startswith("size: "):
-                        self._size = int(line.split(": ")[1])
-                        return self._size
+                        size = int(line.split(": ")[1])
+                        return size
 
         # count the number by hand
-        self._size = utils.count_samples(self.path, self.verbose)
+        size = utils.count_samples(self.path, self.verbose)
 
         # store it in the metadata file
-        utils.v_print(self.verbose, "writing size '{}' to '{}'".format(self._size, metadata_path))
+        utils.v_print(self.verbose, "writing size '{}' to '{}'".format(size, metadata_path))
         with open(metadata_path, "a+") as outfile:
-            outfile.write("size: {}\n".format(self._size))
+            outfile.write("size: {}\n".format(size))
 
-        return self._size
+        return size
 
     def get(self, size):
         """Return `size` samples from this preprocessed dataset.
@@ -68,6 +115,12 @@ class PreprocessedData:
         Returns:
             tuple(list, list): samples.
         """
+        max_size = self.size
+        if max_size < size:
+            raise InsufficientSamplesError(
+                size - max_size, os.path.dirname(os.path.dirname(self.path)), self.verbose
+            )
+
         return utils.get_samples(self.path, size, self.verbose)
 
 
@@ -106,20 +159,20 @@ class Group:
             with open(metadata_path) as infile:
                 for line in infile:
                     if line.startswith("size:"):
-                        self._unprocessed_size = int(line.split(": ")[1])
-                        return self._unprocessed_size
+                        unprocessed_size = int(line.split(": ")[1])
+                        return unprocessed_size
 
         # count the number by hand
-        self._unprocessed_size = utils.count_samples(self.path, self.verbose)
+        unprocessed_size = utils.count_samples(self.path, self.verbose)
 
         # store it in the metadata file
         utils.v_print(
-            self.verbose, "writing size '{}' to '{}'".format(self._unprocessed_size, metadata_path)
+            self.verbose, "writing size '{}' to '{}'".format(unprocessed_size, metadata_path)
         )
         with open(metadata_path, "a+") as outfile:
-            outfile.write("size: {}\n".format(self._unprocessed_size))
+            outfile.write("size: {}\n".format(unprocessed_size))
 
-        return self._unprocessed_size
+        return unprocessed_size
 
     def get(self, size):
         """Get `size` samples from the unprocessed set.
@@ -131,6 +184,10 @@ class Group:
         Returns:
             tuple(list, list): samples.
         """
+        u_size = self.unprocessed_size
+        if u_size < size:
+            raise InsufficientSamplesError(size - u_size, os.path.dirname(self.path), self.verbose)
+
         return utils.get_samples(self.path, size, self.verbose)
 
     def assert_preprocessed_size(self, func, size):
@@ -148,9 +205,7 @@ class Group:
             (utils.InsufficientSamplesError): there are not enough unprocessed samples.
         """
         if self.unprocessed_size < size:
-            raise utils.InsufficientSamplesError(
-                size - self.unprocessed_size, self.path, self.verbose
-            )
+            raise InsufficientSamplesError(size - self.unprocessed_size, self.path, self.verbose)
 
         # get unprocessed data
         unproc_files = sorted(file for file in os.listdir(self.path) if file.endswith(".pkl"))
@@ -246,20 +301,18 @@ class ParamSet:
             with open(raw_metadata_path) as infile:
                 for line in infile:
                     if line.startswith("size: "):
-                        self._raw_size = int(line.split(": ")[1])
-                        return self._raw_size
+                        raw_size = int(line.split(": ")[1])
+                        return raw_size
 
         # count the number by hand
-        self._raw_size = utils.count_samples(os.path.join(self.path, "raw"), self.verbose)
+        raw_size = utils.count_samples(os.path.join(self.path, "raw"), self.verbose)
 
         # store it in the metadata file
-        utils.v_print(
-            self.verbose, "writing size '{}' to '{}'".format(self._raw_size, raw_metadata_path)
-        )
+        utils.v_print(self.verbose, "writing size '{}' to '{}'".format(raw_size, raw_metadata_path))
         with open(raw_metadata_path, "w+") as outfile:
-            outfile.write("size: {}\n".format(self._raw_size))
+            outfile.write("size: {}\n".format(raw_size))
 
-        return self._raw_size
+        return raw_size
 
     @property
     def time_per_save(self):
@@ -285,7 +338,7 @@ class ParamSet:
             raise ValueError("samples are already in 'raw' directory")
 
         if size > self.raw_size:
-            raise utils.InsufficientSamplesError(size - self.raw_size, self.path)
+            raise InsufficientSamplesError(size - self.raw_size, self.path)
 
         # make sure the group exists
         os.makedirs(os.path.join(self.path, target), exist_ok=True)
