@@ -1,3 +1,4 @@
 slurm_output
 cache
 **/*.pyc
+SLURM_gen.egg-info
