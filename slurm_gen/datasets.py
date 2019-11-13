@@ -308,6 +308,79 @@ def wavelength_sweep(size, params):
         yield wl, fields
 
 
+def _single_fixed_sim(params):
+    """Perform a single simulation using the specified parameters.
+
+    Necessary attributes of params:
+        sidewall_angle (Number): angle of waveguide wall.
+        width (Number): width of top of waveguide.
+        width_right (Number): the maximum width of the waveguide for all simulations; used to determine simulation grid.
+        thickness (Number): height of waveguide.
+        thickness_right (Number): the maximum thickness of the waveguide for all simulations; used to determine simulation grid.
+        xWidth (Number): width of simulation in microns.
+        yWidth (Number): height of simulation in microns.
+        dcore (Number): density of simulation in waveguide core.
+        dcladding (Number): density of simulation in waveguide cladding.
+        wavelength (Number): wavelength of light in micrometers.
+        numModes (int): number of modes to solve for.
+    Returns:
+        (list): x-position values for the samples in the image.
+        (list): y-position values for the samples in the image.
+        (tuple): the following stuff:
+                 (list): wave numbers of modes solved for.
+                 (list): radius (r) of H field for each mode.
+                 (list): height (z) of H field for each mode.
+                 (list): angle (phi) of H field for each mode.
+                 (list): radius (r) of E field for each mode.
+                 (list): height (z) of E field for each mode.
+                 (list): angle (phi) of E field for each mode.
+    """
+    # set up the waveguide geometry
+    sidewall_angle_radians = params.sidewall_angle / 180 * np.pi
+
+    # create shape
+    waveguide = pm.Trapezoid(
+        center=pm.Vector3(0, 0),
+        top_face=params.width,
+        thickness=params.thickness,
+        sidewall_angle=sidewall_angle_radians,
+        core=Si,
+        cladding=SiO2,
+    )
+
+    geometry = [waveguide]
+
+    # Set up the simulation grid
+    bottomFace = params.width_right + 2 * (params.thickness_right / np.tan(sidewall_angle_radians))
+    xLocs = [0, bottomFace / 2, bottomFace / 2 + 0.1, params.xWidth / 2]
+    xVals = [params.dcore, params.dcore, params.dcladding, params.dcladding]
+    xx = make_grid(xLocs, xVals)
+
+    yLocs = [0, params.thickness_right / 2, params.thickness_right / 2 + 0.1, params.yWidth / 2]
+    yVals = [params.dcore, params.dcore, params.dcladding, params.dcladding]
+    yy = make_grid(yLocs, yVals)
+    yy = np.concatenate((-(np.flip(yy[1:-1], 0)), yy))
+
+    # Run the simulation
+    sim = pm.Simulation(
+        geometry=geometry,
+        wavelength=params.wavelength,
+        numModes=params.numModes,
+        xGrid=xx,
+        yGrid=yy,
+        background=SiO2,
+        # don't overlap data files for this simulation with concurrent simulations
+        folderName=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "cache/.temp_wgms3d",
+            utils.get_unique_filename(),
+        ),
+    )
+
+    sim.run()
+    return xx, yy, sim.getFields()
+
+
 class DimensionSweepParams(utils.DefaultParamObject):
     """Attributes defining parameters to the dimension_sweep experiment."""
 
@@ -359,7 +432,7 @@ def dimension_sweep(size, params):
     ):
         params.width = width
         params.thickness = thickness
-        fields = _single_sim(params)[2]  # just keep fields
+        fields = _single_fixed_sim(params)[2]  # just keep fields
         yield (width, thickness), fields
 
 
