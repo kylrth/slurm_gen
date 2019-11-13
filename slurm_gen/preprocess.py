@@ -50,9 +50,13 @@ def _preprocess(dataset, param_num, target, size, preprocessor, verbose):
         param_set.move(target, size)
 
     # ask confirmation
+    try:
+        current_size = group[preprocessor.__name__].size
+    except IndexError:
+        current_size = 0
     print(
         "Would you like to preprocess {} samples with '{}'?".format(
-            group.unprocessed_size, preprocessor.__name__
+            size - current_size, preprocessor.__name__
         )
     )
     print("This would result in a total of {} samples preprocessed this way.".format(size), end="")
