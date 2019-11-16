@@ -105,16 +105,20 @@ class PreprocessedData:
 
         return size
 
-    def get(self, size):
+    def get(self, size=None):
         """Return `size` samples from this preprocessed dataset.
 
         Warning: this data comes in order. You'll probably want to shuffle it.
 
         Args:
-            size (int): number of samples to return.
+            size (int): number of samples to return. If None, return all of them
         Returns:
             tuple(list, list): samples.
         """
+        if size is None:
+            # get all the samples
+            return utils.get_samples(self.path, self.size, self.verbose)
+
         max_size = self.size
         if max_size < size:
             raise InsufficientSamplesError(
@@ -174,16 +178,20 @@ class Group:
 
         return unprocessed_size
 
-    def get(self, size):
+    def get(self, size=None):
         """Get `size` samples from the unprocessed set.
 
         Warning: this data comes in order. You'll probably want to shuffle it.
 
         Args:
-            size (int): number of samples to retrieve.
+            size (int): number of samples to retrieve. If None, return all the samples.
         Returns:
             tuple(list, list): samples.
         """
+        if size is None:
+            # return all the samples
+            return utils.get_samples(self.path, self.unprocessed_size, self.verbose)
+
         u_size = self.unprocessed_size
         if u_size < size:
             raise InsufficientSamplesError(size - u_size, os.path.dirname(self.path), self.verbose)
