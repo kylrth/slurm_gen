@@ -24,7 +24,8 @@ def _preprocess(dataset, param_num, target, size, preprocessor, verbose):
     """
     # make sure the param set has enough samples
     param_set = Cache(verbose=verbose)[dataset][param_num]
-    if param_set.raw_size < size:
+    group = param_set[target]
+    if param_set.raw_size + group.unprocessed_size < size:
         print("This param set only has {} samples. Aborting".format(param_set.raw_size))
         return
 
@@ -33,7 +34,6 @@ def _preprocess(dataset, param_num, target, size, preprocessor, verbose):
     print("Group:", target)
 
     # make sure the group has enough unprocessed samples
-    group = param_set[target]
     if group.unprocessed_size < size:
         print("This group only has {} samples.".format(group.unprocessed_size))
         print(
@@ -47,7 +47,7 @@ def _preprocess(dataset, param_num, target, size, preprocessor, verbose):
             print("Aborting")
             return
 
-        param_set.move(target, size)
+        param_set.move(target, size - group.unprocessed_size)
 
     # ask confirmation
     try:
