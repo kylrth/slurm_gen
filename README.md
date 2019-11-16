@@ -90,7 +90,6 @@ X, y = slurm_gen.data_loading.get_data(
 
 ## TODO
 
-- When lots of raw samples are being assigned, `pickle` causes really big memory usage. Split pickling into smaller units.
-- Add example of parameter object for sine.
+- Revamp example.
 - Allow datasets to be defined outside datasets.py.
-- Let the generator decorator get information from the docstring.
+- Be more efficient with keeping track of the sizes of the datasets.

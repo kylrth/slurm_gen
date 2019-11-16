@@ -4,13 +4,6 @@ Use these modules if you encounter a data_loading.InsufficientSamplesError.
 
 This module provides a CLI, which is probably the easiest way to use it.
 
-# TODO: move the following to the readme
-Example commands to run from the command line:
-
-python -m slurm_gen.generate dimension_sweep
-python -m slurm_gen list
-python -m slurm_gen dataset dimension_sweep list  # list params
-
 Kyle Roth. 2019-05-27.
 """
 
