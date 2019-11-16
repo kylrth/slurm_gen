@@ -158,9 +158,7 @@ def _generate_with_SLURM(dataset, size, params, options, njobs=1, verbose=False)
         try:
             per_save = Cache(verbose)[dataset][paramObject._to_string()].time_per_save
         except FileNotFoundError:
-            raise argparse.ArgumentError(
-                "no time data is stored for this dataset; --time must be provided"
-            )
+            raise ValueError("no time data is stored for this dataset; --time must be provided")
         utils.v_print(verbose, "two standard deviations above the mean is {}s".format(per_save))
 
         per_sample = per_save / getattr(datasets, dataset).cache_every
@@ -276,4 +274,10 @@ if __name__ == "__main__":
         help="print debug-level information from all functions",
     )
 
-    main(parser.parse_args())
+    try:
+        main(parser.parse_args())
+    except ValueError as e:
+        if str(e) == "no time data is stored for this dataset; --time must be provided":
+            print("Error: " + str(e))
+        else:
+            raise e

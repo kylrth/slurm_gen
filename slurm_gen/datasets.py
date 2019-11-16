@@ -80,7 +80,9 @@ def generator(cache_every, ParamClass):
             time_file = os.path.join(dataset_dir, "raw", ".times", "{}.time").format(unique_name)
             os.makedirs(os.path.dirname(time_file), exist_ok=True)
 
-            with open(time_file, "a+") as time_f:
+            # do line buffering instead of file buffering, so that times are written in case the
+            # process does not finish
+            with open(time_file, "a+", buffering=1) as time_f:
                 while True:
                     start = time()
 

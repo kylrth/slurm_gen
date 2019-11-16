@@ -321,9 +321,17 @@ class ParamSet:
         """
         times = []
         for file in os.listdir(os.path.join(self.path, "raw", ".times")):
+            delete = True
             with open(os.path.join(self.path, "raw", ".times", file), "r") as timefile:
                 for line in timefile:
+                    delete = False
                     times.append(float(line[:-1]))  # trailing newline
+
+            if delete:  # remove empty files
+                os.remove(os.path.join(self.path, "raw", ".times", file))
+
+        if not times:
+            raise FileNotFoundError("no timing information found")
 
         return statistics.mean(times) + 2 * statistics.stdev(times)
 
