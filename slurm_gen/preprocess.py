@@ -11,7 +11,7 @@ from slurm_gen.data_objects import Cache
 from training_tools import components
 
 
-def _preprocess(dataset, param_num, target, size, preprocessor, verbose):
+def _preprocess(dataset, param_num, target, size, preprocessor, yes, verbose):
     """Preprocess samples in a set of data using the specified preprocessor.
 
     Args:
@@ -20,6 +20,7 @@ def _preprocess(dataset, param_num, target, size, preprocessor, verbose):
         target (str): name of target group, e.g. "train" or "test".
         size (int): number of samples to preprocess.
         preprocessor (callable): name of a preprocessor from the training_tools package.
+        yes (bool): if True, confirmation won't be asked
         verbose (bool): whether to print debug statements.
     """
     # make sure the param set has enough samples
@@ -36,16 +37,20 @@ def _preprocess(dataset, param_num, target, size, preprocessor, verbose):
     # make sure the group has enough unprocessed samples
     if group.unprocessed_size < size:
         print("This group only has {} samples.".format(group.unprocessed_size))
-        print(
-            "Would you like to move {} samples into this group?".format(
-                size - group.unprocessed_size
-            ),
-            end="",
-        )
-        confirm = input(" (y/N): ")
-        if confirm.lower() not in {"y", "yes"}:
-            print("Aborting")
-            return
+        if yes:
+            print("Moving {} samples into the group".format(size - group.unprocessed_size))
+        else:
+            # ask confirmation
+            print(
+                "Would you like to move {} samples into this group?".format(
+                    size - group.unprocessed_size
+                ),
+                end="",
+            )
+            confirm = input(" (y/N): ")
+            if confirm.lower() not in {"y", "yes"}:
+                print("Aborting")
+                return
 
         param_set.move(target, size - group.unprocessed_size)
 
@@ -54,16 +59,20 @@ def _preprocess(dataset, param_num, target, size, preprocessor, verbose):
         current_size = group[preprocessor.__name__].size
     except IndexError:
         current_size = 0
-    print(
-        "Would you like to preprocess {} samples with '{}'?".format(
-            size - current_size, preprocessor.__name__
+    if yes:
+        print("Preprocessing {} samples with '{}'".format(size - current_size, preprocessor.__name__))
+        print("for a total of {} samples preprocessed this way.".format(size))
+    else:
+        print(
+            "Would you like to preprocess {} samples with '{}'?".format(
+                size - current_size, preprocessor.__name__
+            )
         )
-    )
-    print("This would result in a total of {} samples preprocessed this way.".format(size), end="")
-    confirm = input(" (y/N): ")
-    if confirm.lower() not in {"y", "yes"}:
-        print("Aborting")
-        return
+        print("This would result in a total of {} samples preprocessed this way.".format(size), end="")
+        confirm = input(" (y/N): ")
+        if confirm.lower() not in {"y", "yes"}:
+            print("Aborting")
+            return
 
     group.assert_preprocessed_size(preprocessor, size)
 
@@ -104,6 +113,9 @@ if __name__ == "__main__":
         + "(must be defined in training_tools.components.preprocessors)",
     )
     parser.add_argument(
+        "-y", "--yes", action="store_true", help="don't ask for confirmation"
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true", help="print debug info while running the command"
     )
 
@@ -119,6 +131,7 @@ if __name__ == "__main__":
             args.target,
             args.n_samples,
             args.preprocessor,
+            args.yes,
             args.verbose,
         )
     except KeyboardInterrupt:
