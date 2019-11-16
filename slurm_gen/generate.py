@@ -17,6 +17,14 @@ import sys
 from slurm_gen import datasets, utils
 from slurm_gen.data_objects import Cache
 
+if "VS_DEBUG" in os.environ and os.environ["VS_DEBUG"] == "true":
+    import ptvsd
+
+    # 5678 is the default attach port in the VS Code debug configurations
+    print("Waiting for debugger attach")
+    ptvsd.enable_attach(address=("localhost", 5678), redirect_output=True)
+    ptvsd.wait_for_attach()
+
 
 def _remove_metadata(dataset, params):
     """Invalidate any record of the number of raw samples for the dataset and param set.
