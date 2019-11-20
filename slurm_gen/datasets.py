@@ -194,6 +194,11 @@ def _single_sim(params):
     yy = make_grid(yLocs, yVals)
     yy = np.concatenate((-(np.flip(yy[1:-1], 0)), yy))
 
+    boundaries = [
+        pm.PML(location=location, thickness=10, strength=1)
+        for location in [pm.Location.N, pm.Location.E, pm.Location.S]
+    ]
+
     # Run the simulation
     sim = pm.Simulation(
         geometry=geometry,
@@ -208,6 +213,7 @@ def _single_sim(params):
             "cache/.temp_wgms3d",
             utils.get_unique_filename(),
         ),
+        boundaries=boundaries,
     )
 
     sim.run()
@@ -363,6 +369,11 @@ def _single_fixed_sim(params):
     yy = make_grid(yLocs, yVals)
     yy = np.concatenate((-(np.flip(yy[1:-1], 0)), yy))
 
+    boundaries = [
+        pm.PML(location=location, thickness=10, strength=1)
+        for location in [pm.Location.N, pm.Location.E, pm.Location.S]
+    ]
+
     # Run the simulation
     sim = pm.Simulation(
         geometry=geometry,
@@ -377,6 +388,7 @@ def _single_fixed_sim(params):
             "cache/.temp_wgms3d",
             utils.get_unique_filename(),
         ),
+        boundaries=boundaries,
     )
 
     sim.run()
