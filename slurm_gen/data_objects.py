@@ -269,7 +269,7 @@ class Group:
             )
         elements = os.listdir(self.path)
         if not os.path.isdir(os.path.join(self.path, idx)) or idx not in elements:
-            raise IndexError(
+            raise FileNotFoundError(
                 "no such preprocessed set found: {}".format(os.path.join(self.path, idx))
             )
         return PreprocessedData(os.path.join(self.path, idx), self.verbose)
@@ -431,10 +431,8 @@ class ParamSet:
         if not isinstance(idx, str):
             raise IndexError("Group access is only permitted by str; got {}".format(type(idx)))
 
-        if idx.startswith(".") or idx == "raw":
-            raise IndexError("no such group found: {}".format(os.path.join(self.path, idx)))
-        if idx not in os.listdir(self.path):
-            raise IndexError("no such group found: {}".format(os.path.join(self.path, idx)))
+        if idx.startswith(".") or idx == "raw" or idx not in os.listdir(self.path):
+            raise FileNotFoundError("no such group found: {}".format(os.path.join(self.path, idx)))
 
         return Group(os.path.join(self.path, idx), self.verbose)
 
@@ -481,7 +479,7 @@ class Dataset:
             return ParamSet(os.path.join(self.path, elements[idx]), self.verbose)
         if isinstance(idx, str):
             if idx not in elements:
-                raise ValueError(
+                raise FileNotFoundError(
                     "no such parameter set found: {}".format(os.path.join(self.path, idx))
                 )
             return ParamSet(os.path.join(self.path, idx), self.verbose)
@@ -526,7 +524,9 @@ class Cache:
             return Dataset(os.path.join(self.path, elements[idx]), self.verbose)
         if isinstance(idx, str):
             if idx not in elements:
-                raise ValueError("no such dataset found: {}".format(os.path.join(self.path, idx)))
+                raise FileNotFoundError(
+                    "no such dataset found: {}".format(os.path.join(self.path, idx))
+                )
             return Dataset(os.path.join(self.path, idx), self.verbose)
         raise IndexError(
             "Dataset access is only permitted with int or str; got {}".format(type(idx))
