@@ -159,7 +159,14 @@ def _generate_with_SLURM(dataset, size, params, options, njobs=1, verbose=False)
         try:
             per_save = Cache(verbose)[dataset][paramObject._to_string()].time_per_save
         except FileNotFoundError:
-            raise ValueError("no time data is stored for this dataset; --time must be provided")
+            try:
+                per_save = Cache(verbose)[dataset][0].time_per_save
+                print("No time data is stored for this parameter set.")
+                yes = input("Would you like to use time data from another parameter set? (Y/n): ")
+                if yes.lower() in {"n", "no"}:
+                    raise ValueError("no time data for this param set; --time must be provided")
+            except FileNotFoundError:
+                raise ValueError("no time data for this dataset; --time must be provided")
         utils.v_print(verbose, "two standard deviations above the mean is {}s".format(per_save))
 
         per_sample = per_save / getattr(datasets, dataset).cache_every

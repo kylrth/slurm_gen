@@ -341,6 +341,13 @@ class ParamSet:
         if not times:
             raise FileNotFoundError("no timing information found")
 
+        # variance requires at least two data points
+        if len(times) < 2:
+            utils.v_print(
+                self.verbose, "only one timing data point found; estimated time may be inaccurate"
+            )
+            return times[0] * 1.1
+
         return statistics.mean(times) + 2 * statistics.stdev(times)
 
     def move(self, target, size):
