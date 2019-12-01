@@ -418,7 +418,7 @@ class DimensionSweepParams(utils.DefaultParamObject):
     dcladding = 20.01e-3
 
     # number of modes to return
-    numModes = 1
+    numModes = 6
 
     # wavelength
     wavelength = 1.55
