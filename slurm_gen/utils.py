@@ -156,7 +156,7 @@ def get_SLURM_output_dir():
     Returns:
         (str): the absolute path.
     """
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "slurm_output")
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "slurm_output")
 
 
 def get_unique_filename():
