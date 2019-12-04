@@ -343,36 +343,33 @@ def _single_fixed_sim(params):
                  (list): height (z) of E field for each mode.
                  (list): angle (phi) of E field for each mode.
     """
-    # set up the waveguide geometry
-    sidewall_angle_radians = params.sidewall_angle / 180 * np.pi
-
-    # create shape
-    waveguide = pm.Trapezoid(
-        center=pm.Vector3(0, 0),
-        top_face=params.width,
-        thickness=params.thickness,
-        sidewall_angle=sidewall_angle_radians,
-        core=Si,
-        cladding=SiO2,
-    )
-
-    geometry = [waveguide]
+    geometry = [
+        pm.Rectangle(pm.Vector3(0, 0), pm.Vector3(params.width, params.thickness), Si, SiO2)
+    ]
+    boundaries = [
+        pm.PML(pm.Location.N),
+        pm.PML(pm.Location.S),
+        pm.PML(pm.Location.E),
+        pm.PML(pm.Location.W),
+    ]
 
     # Set up the simulation grid
-    bottomFace = params.width_right + 2 * (params.thickness_right / np.tan(sidewall_angle_radians))
-    xLocs = [0, bottomFace / 2, bottomFace / 2 + 0.1, params.xWidth / 2]
-    xVals = [params.dcore, params.dcore, params.dcladding, params.dcladding]
-    xx = make_grid(xLocs, xVals)
-
-    yLocs = [0, params.thickness_right / 2, params.thickness_right / 2 + 0.1, params.yWidth / 2]
-    yVals = [params.dcore, params.dcore, params.dcladding, params.dcladding]
-    yy = make_grid(yLocs, yVals)
-    yy = np.concatenate((-(np.flip(yy[1:-1], 0)), yy))
-
-    boundaries = [
-        pm.PML(location=location, thickness=10, strength=1)
-        for location in [pm.Location.N, pm.Location.E, pm.Location.S]
+    xLocs = [
+        -params.xWidth / 2,
+        -params.width_right / 2 - 0.1,
+        params.width_right / 2 + 0.1,
+        params.xWidth / 2,
     ]
+    hs = [params.dcladding, params.dcore, params.dcore, params.dcladding]
+    xx = make_grid(xLocs, hs)
+
+    yLocs = [
+        -params.yWidth / 2,
+        -params.thickness_right / 2 - 0.1,
+        params.thickness_right / 2 + 0.1,
+        params.yWidth / 2,
+    ]
+    yy = make_grid(yLocs, hs)
 
     # Run the simulation
     sim = pm.Simulation(
@@ -390,16 +387,13 @@ def _single_fixed_sim(params):
         ),
         boundaries=boundaries,
     )
-
     sim.run()
+
     return xx, yy, sim.getFields()
 
 
 class DimensionSweepParams(utils.DefaultParamObject):
     """Attributes defining parameters to the dimension_sweep experiment."""
-
-    # angle of incidence between waveguide side wall and substrate
-    sidewall_angle = 90
 
     # dimensions of waveguide in microns
     width_left = 0.2
@@ -408,8 +402,8 @@ class DimensionSweepParams(utils.DefaultParamObject):
     thickness_right = 0.5
 
     # dimensions of simulation in microns
-    xWidth = 5
-    yWidth = 3
+    xWidth = 6
+    yWidth = 6
 
     # simulation resolution in the waveguide core
     dcore = 20.01e-4
