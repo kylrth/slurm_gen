@@ -153,6 +153,7 @@ def _generate_with_SLURM(dataset, size, params, options, njobs=1, verbose=False)
     _remove_metadata(dataset, params)
 
     SLURM_out = utils.get_SLURM_output_dir()
+    os.makedirs(SLURM_out, exist_ok=True)
 
     per_sample = None
     if options.time is None:
