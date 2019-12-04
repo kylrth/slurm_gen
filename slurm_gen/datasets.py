@@ -348,24 +348,21 @@ def _single_fixed_sim(params):
     ]
     boundaries = [
         pm.PML(pm.Location.N),
-        pm.PML(pm.Location.S),
         pm.PML(pm.Location.E),
-        pm.PML(pm.Location.W),
+        # electric conductors on S and W
     ]
 
     # Set up the simulation grid
     xLocs = [
-        -params.xWidth / 2,
-        -params.width_right / 2 - 0.1,
+        0,
         params.width_right / 2 + 0.1,
         params.xWidth / 2,
     ]
-    hs = [params.dcladding, params.dcore, params.dcore, params.dcladding]
+    hs = [params.dcore, params.dcore, params.dcladding]
     xx = make_grid(xLocs, hs)
 
     yLocs = [
-        -params.yWidth / 2,
-        -params.thickness_right / 2 - 0.1,
+        0,
         params.thickness_right / 2 + 0.1,
         params.yWidth / 2,
     ]
@@ -402,17 +399,17 @@ class DimensionSweepParams(utils.DefaultParamObject):
     thickness_right = 0.5
 
     # dimensions of simulation in microns
-    xWidth = 6
-    yWidth = 6
+    xWidth = 4
+    yWidth = 4
 
     # simulation resolution in the waveguide core
-    dcore = 20.01e-4
+    dcore = 0.005
 
     # simulation resolution in the cladding
-    dcladding = 20.01e-3
+    dcladding = 0.05
 
     # number of modes to return
-    numModes = 6
+    numModes = 2
 
     # wavelength
     wavelength = 1.55
