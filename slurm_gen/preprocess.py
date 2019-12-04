@@ -57,7 +57,7 @@ def _preprocess(dataset, param_num, target, size, preprocessor, yes, verbose):
     # ask confirmation
     try:
         current_size = group[preprocessor.__name__].size
-    except IndexError:
+    except FileNotFoundError:
         current_size = 0
     if yes:
         print("Preprocessing {} samples with '{}'".format(size - current_size, preprocessor.__name__))
