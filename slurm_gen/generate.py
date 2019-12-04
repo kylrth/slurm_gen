@@ -131,6 +131,9 @@ def create_SLURM_command(dataset, size, params, SLURM_out, options):
     if options.GPUs:
         command += " --gres=gpu:{}".format(utils.sanitize_str(options.GPUs))
 
+    if options.avx2:
+        command += " -C 'avx2'"
+
     return command
 
 
@@ -273,6 +276,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--GPUs", type=int, default=0, help="specify the number of GPUs to allocate to each job"
+    )
+    parser.add_argument(
+        "--avx2",
+        action="store_true",
+        help="require a node that supports AVX2 instructions (useful for TensorFlow)",
     )
 
     parser.add_argument(
