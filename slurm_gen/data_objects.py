@@ -505,6 +505,7 @@ class Cache:
             verbose (bool): whether to print debug statements.
         """
         self.path = utils.get_cache_dir()
+        os.makedirs(self.path, exist_ok=True)
         self.verbose = verbose
         utils.v_print(verbose, "creating new Cache object with path '{}'".format(self.path))
 
