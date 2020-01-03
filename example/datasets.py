@@ -16,7 +16,12 @@ class NoisySineParams(slurm_gen.DefaultParamObject):
     std_dev = 0.1
 
 
-@slurm_gen.generator(50, NoisySineParams)
+# we can specify extra SLURM batch parameters here
+options = "--qos=test"
+
+
+# here we also tell SLURM_gen to save every 50 samples and request 1GB of memory
+@slurm_gen.generator(50, NoisySineParams, "1GB", options)
 def noisy_sine(size, params):
     """Create samples from a noisy sine wave.
 

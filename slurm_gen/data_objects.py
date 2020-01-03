@@ -278,16 +278,16 @@ class Group:
 class ParamSet:
     """Represents a parameter set with all its datasets beneath it."""
 
-    def __init__(self, cache_path, verbose=False):
+    def __init__(self, path, verbose=False):
         """Store the path to the param set to allow access to child Groups and raw data.
 
         Args:
-            cache_path (str): path to parameter set; should be a subdirectory of a
+            path (str): path to parameter set; should be a subdirectory of a
                               dataset directory.
             verbose (bool): whether to print debug statements.
         """
-        self.path = cache_path
-        self.name = os.path.basename(os.path.normpath(cache_path))
+        self.path = path
+        self.name = os.path.basename(os.path.normpath(path))
         self.verbose = verbose
         utils.v_print(verbose, "creating new ParamSet object with")
         utils.v_print(verbose, "  path '{}'".format(self.path))
@@ -420,9 +420,13 @@ class ParamSet:
             pass
 
     def __iter__(self):
-        self._iterator = iter(
-            {item for item in os.listdir(self.path) if not item.startswith(".") and item != "raw"}
-        )
+        try:
+            self._iterator = iter(
+                {item for item in os.listdir(self.path) if not item.startswith(".") and item != "raw"}
+            )
+        except FileNotFoundError:
+            self._iterator = iter(())
+
         return self
 
     def __next__(self):
@@ -450,16 +454,17 @@ class ParamSet:
 class Dataset:
     """Represents a dataset with all its parameter sets beneath it."""
 
-    def __init__(self, cache_path, verbose=False):
+    def __init__(self, path, generator, verbose=False):
         """Store the path to the dataset to allow access to child ParamSets.
 
         Args:
-            cache_path (str): path to dataset; should be a subdirectory of the cache
+            path (str): path to dataset; should be a subdirectory of the cache
                               directory.
             verbose (bool): whether to print debug statements.
         """
-        self.path = cache_path
-        self.name = os.path.basename(os.path.normpath(cache_path))
+        self.path = path
+        self.generator = generator
+        self.name = os.path.basename(os.path.normpath(self.path))
         self.verbose = verbose
         utils.v_print(verbose, "creating new Dataset object with")
         utils.v_print(verbose, "  path '{}'".format(self.path))
@@ -480,16 +485,26 @@ class Dataset:
         return ParamSet(os.path.join(self.path, next(self._iterator)), self.verbose)
 
     def __getitem__(self, idx):
-        """Access either by name of ParamSet or by index."""
+        """Access ParamSets by number, string, ParamObject, or dict of params."""
         elements = list(sorted(os.listdir(self.path)))
+
         if isinstance(idx, int):
             return ParamSet(os.path.join(self.path, elements[idx]), self.verbose)
+
         if isinstance(idx, str):
             if idx not in elements:
                 raise FileNotFoundError(
                     "no such parameter set found: {}".format(os.path.join(self.path, idx))
                 )
             return ParamSet(os.path.join(self.path, idx), self.verbose)
+
+        if isinstance(idx, utils.DefaultParamObject):
+            return ParamSet(os.path.join(self.path, idx._to_string()), self.verbose)
+
+        if isinstance(idx, dict):
+            idx = generator.paramClass(**dict)
+            return ParamSet(os.path.join(self.path, idx._to_string()), self.verbose)
+
         raise IndexError(
             "ParamSet access is only permitted with int or str; got {}".format(type(idx))
         )
@@ -498,44 +513,79 @@ class Dataset:
 class Cache:
     """Represents a cache location and all of its datasets."""
 
-    def __init__(self, verbose=False):
-        """For now, the cache location is constant.
+    def __init__(self, path, verbose=False):
+        """Initialize the cache in this location.
 
         Args:
+            path (str): path to the directory where modules exist.
             verbose (bool): whether to print debug statements.
         """
-        self.path = utils.get_cache_dir()
-        os.makedirs(self.path, exist_ok=True)
+        self.path = path
+        self.cache_path = os.path.join(path, ".slurm_cache")
+        os.makedirs(self.cache_path, exist_ok=True)
         self.verbose = verbose
         utils.v_print(verbose, "creating new Cache object with path '{}'".format(self.path))
 
         self._iterator = None
+        self._generators = None
+
+    @property
+    def generators(self):
+        """Get generators defined in `datasets.py`.
+
+        Returns:
+            (list(callable)): generating functions for each dataset.
+        """
+        if self._generators is None:
+            self._generators = utils.get_generators(self.path)
+        return self._generators
+
+    @property
+    def datasets(self):
+        """Get names of the datasets defined in `datasets.py`.
+
+        Returns:
+            (list(str)): names of datasets.
+        """
+        out = []
+        for generator in self.generators:
+            out.append(generator.__name__)
+        return out
 
     def __iter__(self):
-        self._iterator = iter(
-            sorted(item for item in os.listdir(self.path) if not item.startswith("."))
-        )
+        self._iterator = iter(sorted(self.generators))
         return self
 
     def __next__(self):
-        """Iterate over datasets in the cache.
+        """Iterate over datasets defined in this directory.
 
         Returns:
             (Dataset): the next dataset in the cache.
         """
-        return Dataset(os.path.join(self.path, next(self._iterator)), self.verbose)
+        generator = next(self._iterator)
+        return Dataset(os.path.join(self.cache_path, generator.__name__), generator, self.verbose)
 
     def __getitem__(self, idx):
         """Access either by name of Dataset or by index."""
-        elements = list(sorted(item for item in os.listdir(self.path) if not item.startswith(".")))
+        elements = list(sorted(self.generators))
+
         if isinstance(idx, int):
-            return Dataset(os.path.join(self.path, elements[idx]), self.verbose)
+            return Dataset(
+                os.path.join(self.path, elements[idx].__name__), elements[idx], self.verbose
+            )
+
         if isinstance(idx, str):
-            if idx not in elements:
-                raise FileNotFoundError(
-                    "no such dataset found: {}".format(os.path.join(self.path, idx))
-                )
-            return Dataset(os.path.join(self.path, idx), self.verbose)
+            for generator in elements:
+                if generator.__name__ == idx:
+                    return Dataset(os.path.join(self.path, idx), generator, self.verbose)
+            raise FileNotFoundError(
+                "no such dataset found: {}".format(os.path.join(self.path, idx))
+            )
+
+        if callable(idx):
+            # data generating function
+            return Dataset(os.path.join(self.path, idx.__name__), idx, self.verbose)
+
         raise IndexError(
             "Dataset access is only permitted with int or str; got {}".format(type(idx))
         )

@@ -4,6 +4,7 @@ Kyle Roth. 2019-05-17."""
 
 
 from glob import iglob as glob
+import importlib.util
 import inspect
 import os
 import pickle
@@ -91,14 +92,28 @@ class DefaultParamObject:
         Attributes beginning with an underscore are not included.
 
         Returns:
-            (str): each parameter's name and value, separated by pipe characters ("|").
+            (str): each parameter's name and value divided by "#", with each pair separated by "|".
         """
         out = ""
         for attr in dir(self):
             if not attr.startswith("_"):
-                out += "|" + attr + repr(getattr(self, attr))
+                out += "|{}#{}".format(attr, repr(getattr(self, attr)))
 
         return out[1:]  # cut off first pipe character
+
+    @classmethod
+    def _from_string(cls, s):
+        """Create a new param object from the string produced by `_to_string()`.
+
+        Args:
+            s (str): string with "|" separating attributes and "#" dividing names and values.
+        """
+        args = {}
+        for pair in s.split("|"):
+            attr, val = pair.split("#")
+            # convert to the type of the default attribute
+            args[attr] = type(getattr(cls, attr))(val)
+        return cls(**args)
 
 
 def get_func_name(func):
@@ -116,6 +131,80 @@ def get_func_name(func):
     return func.__name__
 
 
+def is_generator(obj):
+    """Determine whether the object is a data generating function wrapped with @slurm_gen.generator.
+
+    Args:
+        obj
+    Returns:
+        (bool): whether it is a data generating function.
+    """
+    if not callable(obj):
+        return False
+    if not hasattr(obj, "paramClass"):
+        return False
+    if not hasattr(obj, "slurm_options"):
+        return False
+    if not hasattr(obj, "cache_every"):
+        return False
+    return hasattr(obj, "bash_commands")
+
+
+def get_generators(path="."):
+    """Return the generator functions defined in the `datasets.py` module in the given directory.
+
+    Args:
+        path (str): directory to search.
+    Returns:
+        (list(callable)): generating functions.
+    """
+    # confirm the file exists
+    if not os.path.isfile(os.path.join(path, "datasets.py")):
+        raise ValueError("no dataset file found")
+
+    # import the module
+    spec = importlib.util.spec_from_file_location("temp_module", os.path.join(path, "datasets.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # collect the generators
+    out = []
+    for var in dir(mod):
+        if is_generator(getattr(mod, var)):
+            out.append(getattr(mod, var))
+
+    return out
+
+
+def get_generator(name, path="."):
+    """Get the generator function by name as defined in the `datasets.py` module in the given
+    directory.
+
+    Args:
+        name (str): name of function.
+        path (str): directory to search.
+    Returns:
+        (callable): generating function.
+    """
+    # confirm the file exists
+    if not os.path.isfile(os.path.join(path, "datasets.py")):
+        raise ValueError("no dataset file found")
+
+    # import the module
+    spec = importlib.util.spec_from_file_location("temp_module", os.path.join(path, "datasets.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # ensure it's a generator
+    if not is_generator(getattr(mod, name)):
+        raise ValueError(
+            "no data generating function found by name {}; "
+            "was wrapped with @slurm_gen.generator?".format(name)
+        )
+
+    return getattr(mod, name)
+
+
 def sanitize_str(s):
     """Sanitize strings to send to a shell.
 
@@ -124,39 +213,30 @@ def sanitize_str(s):
     Returns:
         (str): sanitized string.
     """
-    return str(s).replace('"', '\\"')
+    return str(s).replace('"', '\\"').replace("'", "\\'")
 
 
-def get_cache_dir():
-    """Get the absolute path to the cache location.
-
-    Returns:
-        (str): the absolute path.
-    """
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cache")
-
-
-def get_dataset_dir(name, params):
-    """Get the absolute path to the cache location for this specific dataset.
+def get_dataset_dir(cache_dir, name, params):
+    """Get the path to the cache location for this specific dataset.
 
     Args:
         name (str): name of dataset.
         params: an object with a _to_string() method, containing parameters used by the
                 generating function.
     """
-    return os.path.join(get_cache_dir(), name, params._to_string())
+    return os.path.join(cache_dir, ".slurm_cache", name, params._to_string())
 
 
-def get_SLURM_output_dir():
+def get_SLURM_output_dir(module):
     """Get the absolute path of the directory where data generation jobs should place
-    their output.
-
-    From the directory of this module, this is the absolute path of ./slurm_output.
+    their output for this module.
 
     Returns:
         (str): the absolute path.
     """
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "slurm_output")
+    return os.path.join(
+        os.path.dirname(os.path.abspath(module)), ".slurm_gen_cache", ".slurm_output"
+    )
 
 
 def get_unique_filename():
