@@ -131,6 +131,25 @@ def get_func_name(func):
     return func.__name__
 
 
+def _import_datasets(path):
+    """Import the datasets.py module defined in the given directory.
+
+    Args:
+        path (str): directory containing datasets.py.
+    Returns:
+        the imported module
+    """
+    # confirm the file exists
+    if not os.path.isfile(os.path.join(path, "datasets.py")):
+        raise ValueError("no dataset file found")
+
+    spec = importlib.util.spec_from_file_location("datasets", os.path.join(path, "datasets.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    return mod
+
+
 def is_generator(obj):
     """Determine whether the object is a data generating function wrapped with @slurm_gen.generator.
 
@@ -141,7 +160,7 @@ def is_generator(obj):
     """
     if not callable(obj):
         return False
-    if not hasattr(obj, "paramClass"):
+    if not hasattr(obj, "param_class"):
         return False
     if not hasattr(obj, "slurm_options"):
         return False
@@ -158,14 +177,7 @@ def get_generators(path="."):
     Returns:
         (list(callable)): generating functions.
     """
-    # confirm the file exists
-    if not os.path.isfile(os.path.join(path, "datasets.py")):
-        raise ValueError("no dataset file found")
-
-    # import the module
-    spec = importlib.util.spec_from_file_location("temp_module", os.path.join(path, "datasets.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = _import_datasets(path)
 
     # collect the generators
     out = []
@@ -176,7 +188,7 @@ def get_generators(path="."):
     return out
 
 
-def get_generator(name, path="."):
+def get_generator(name, path=os.getcwd()):
     """Get the generator function by name as defined in the `datasets.py` module in the given
     directory.
 
@@ -186,20 +198,53 @@ def get_generator(name, path="."):
     Returns:
         (callable): generating function.
     """
-    # confirm the file exists
-    if not os.path.isfile(os.path.join(path, "datasets.py")):
-        raise ValueError("no dataset file found")
-
-    # import the module
-    spec = importlib.util.spec_from_file_location("temp_module", os.path.join(path, "datasets.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = _import_datasets(path)
 
     # ensure it's a generator
     if not is_generator(getattr(mod, name)):
         raise ValueError(
-            "no data generating function found by name {}; "
-            "was wrapped with @slurm_gen.generator?".format(name)
+            "no dataset '{}' found; was it wrapped with @slurm_gen.dataset?".format(name)
+        )
+
+    return getattr(mod, name)
+
+
+def get_preprocessors(dataset, path=os.getcwd()):
+    """Return the preprocessors available to this dataset.
+
+    Args:
+        dataset (class): dataset decorated with @slurm_gen.dataset.
+        path (str): path to root dataset directory.
+    Returns:
+        (list(class)): preprocessors.
+    """
+    mod = _import_datasets(path)
+
+    # collect the preprocessors, filtering for the given dataset
+    out = []
+    for var in dir(mod):
+        if hasattr(getattr(mod, var), "dataset") and getattr(mod, var).dataset == dataset:
+            out.append(getattr(mod, var))
+
+    return out
+
+
+def get_preprocessor(name, dataset, path=os.getcwd()):
+    """Get the preprocessor by name as defined in the `datasets.py` module in the given directory.
+
+    Args:
+        name (str): name of the preprocessor.
+        dataset (class): dataset decorated with @slurm_gen.dataset.
+    Returns:
+        (class): preprocessor.
+    """
+    mod = _import_datasets(path)
+
+    if not hasattr(getattr(mod, name), "dataset") or getattr(mod, name).dataset != dataset:
+        raise ValueError(
+            "no preprocessor '{}' found; was it wrapped with @{}.preprocessor?".format(
+                name, dataset.__name__
+            )
         )
 
     return getattr(mod, name)

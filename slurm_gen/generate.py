@@ -39,14 +39,14 @@ def _generate_here(generator, size, params, verbose=False):
     generation function defined in datasets.py.
 
     Args:
-        generator (str): data generating function.
+        generator (callable): data generating function.
         size (int): number of samples to generate.
         params (dict): parameter dict to pass to generating function.
     """
     _remove_metadata(generator.__name__, params, verbose)
 
     # generate the data
-    generator(size, params.__dict__)
+    generator.call(size, params.__dict__)
 
 
 # the base string for submitting a data generation job to SLURM
@@ -55,7 +55,7 @@ raw_SLURM = """echo '#!/bin/bash
 {bash_commands}
 
 cd "{cwd}"
-python3 -u -c "from {this}.utils import get_generator as g; g(\\'{mod}\\')({size}, \\'{params}\\')"
+python3 -u -c "from {this}.utils import get_generator as g; g(\\'{mod}\\').call({size}, \\'{params}\\')"
 ' | sbatch --error="{out}/%j.out" --output="{out}/%j.out" """
 
 
@@ -175,7 +175,7 @@ def generate(dataset, n, params, njobs=1, job_time=None, this_node=False, verbos
         verbose (bool): print debug-level information from all functions.
     """
     generator = utils.get_generator(dataset)
-    params = generator.paramClass(**params)
+    params = generator.param_class(**params)
     if this_node:
         _generate_here(generator, n, params, verbose)
     else:

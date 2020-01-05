@@ -60,19 +60,17 @@ class InsufficientSamplesError(Exception):
 
 
 class PreprocessedData:
-    """Represents a single list of data samples, preprocessed by a specific
-    preprocessor."""
+    """Represents a single list of data samples, preprocessed by a specific preprocessor."""
 
-    def __init__(self, cache_path, verbose=False):
+    def __init__(self, path, verbose=False):
         """Store the path to the data.
 
         Args:
-            cache_path (str): path to the directory containing pickle files with the
-                              processed data.
+            path (str): path to the directory containing pickle files with the processed data.
             verbose (bool): whether to print debug statements.
         """
-        self.path = cache_path
-        self.name = os.path.basename(os.path.normpath(cache_path))
+        self.path = path
+        self.name = os.path.basename(os.path.normpath(self.path))
         self.verbose = verbose
         utils.v_print(verbose, "creating new PreprocessedData object with")
         utils.v_print(verbose, "  path '{}'".format(self.path))
@@ -111,7 +109,7 @@ class PreprocessedData:
         Warning: this data comes in order. You'll probably want to shuffle it.
 
         Args:
-            size (int): number of samples to return. If None, return all of them
+            size (int): number of samples to return. If None, return all of them.
         Returns:
             tuple(list, list): samples.
         """
@@ -132,16 +130,18 @@ class Group:
     """Represents a group of data samples, and contains references to all contained
     PreprocessedData."""
 
-    def __init__(self, cache_path, verbose=False):
+    def __init__(self, path, paramSet, verbose=False):
         """Store the path to the group, to allow access to raw data.
 
         Args:
-            cache_path (str): path to group; should contain pickle files for the
-                              unprocessed set and directories for each preprocessed set.
+            path (str): path to group; should contain pickle files for the unprocessed set and
+                        directories for each preprocessed set.
+            paramSet (ParamSet): param set this group belongs to.
             verbose (bool): whether to print debug statements.
         """
-        self.path = cache_path
-        self.name = os.path.basename(os.path.normpath(cache_path))
+        self.path = path
+        self.paramSet = paramSet
+        self.name = os.path.basename(os.path.normpath(path))
         self.verbose = verbose
         utils.v_print(verbose, "creating new Group object with")
         utils.v_print(verbose, "  path '{}'".format(self.path))
@@ -198,16 +198,14 @@ class Group:
 
         return utils.get_samples(self.path, size, self.verbose)
 
-    def assert_preprocessed_size(self, func, size):
+    def assert_preprocessed_size(self, name, size):
         """Ensure that at least `size` samples have been processed with `func`.
 
         The preprocessor must accept a list of data points and a list of corresponding labels. It
         should return preprocessed versions of both data and label.
 
         Args:
-            func (callable): preprocessing function to be applied to data. `func` is called on X, y
-                             where X is an iterable of all data points and y is an iterable of all
-                             labels.
+            func (str): name of preprocessor to be applied to data.
             size (int): number of samples to preprocess.
         Raises:
             (utils.InsufficientSamplesError): there are not enough unprocessed samples.
@@ -219,8 +217,8 @@ class Group:
         unproc_files = sorted(file for file in os.listdir(self.path) if file.endswith(".pkl"))
 
         # make sure the PreprocessedData exists
-        os.makedirs(os.path.join(self.path, func.__name__), exist_ok=True)
-        proc_set = self[func.__name__]
+        os.makedirs(os.path.join(self.path, name), exist_ok=True)
+        proc_set = self[name]
 
         # get the current size of the PreprocessedData and the individual files which
         # have already been preprocessed
@@ -248,46 +246,51 @@ class Group:
 
     def __iter__(self):
         self._iterator = iter(
-            {item for item in os.listdir(self.path) if os.path.isdir(os.path.join(self.path, item))}
+            utils.get_preprocessors(
+                self.generator, os.path.dirname(os.path.dirname(self.paramSet.dataset.path))
+            )
         )
+
         return self
 
     def __next__(self):
         """Iterate over the PreprocessedData for this Group.
 
         Returns:
-            (PreprocessedData): the next preprocessed data that has been created under
-                                this group.
+            (PreprocessedData): the next preprocessed data that has been created under this group.
         """
-        return PreprocessedData(os.path.join(self.path, next(self._iterator)), self.verbose)
+        preproc = next(self._iterator)
+        return PreprocessedData(os.path.join(self.path, preproc.__name__), preproc, self.verbose)
 
     def __getitem__(self, idx):
         """Allow access by name of PreprocessedData."""
         if not isinstance(idx, str):
             raise IndexError(
-                "Preprocessed set access is only permitted by str; got {}".format(type(idx))
+                "Preprocessed set access only permitted by str; got {}".format(type(idx))
             )
-        elements = os.listdir(self.path)
-        if not os.path.isdir(os.path.join(self.path, idx)) or idx not in elements:
-            raise FileNotFoundError(
-                "no such preprocessed set found: {}".format(os.path.join(self.path, idx))
-            )
-        return PreprocessedData(os.path.join(self.path, idx), self.verbose)
+
+        preproc = utils.get_preprocessor(
+            idx,
+            self.paramSet.dataset.generator,
+            os.path.dirname(os.path.dirname(self.paramSet.dataset.path)),
+        )
+        return PreprocessedData(os.path.join(self.path, idx), preproc, self.verbose)
 
 
 class ParamSet:
     """Represents a parameter set with all its datasets beneath it."""
 
-    def __init__(self, path, verbose=False):
+    def __init__(self, path, dataset, verbose=False):
         """Store the path to the param set to allow access to child Groups and raw data.
 
         Args:
-            path (str): path to parameter set; should be a subdirectory of a
-                              dataset directory.
+            path (str): path to parameter set; should be a subdirectory of a dataset directory.
+            dataset (Dataset): the dataset this ParamSet belongs to.
             verbose (bool): whether to print debug statements.
         """
         self.path = path
         self.name = os.path.basename(os.path.normpath(path))
+        self.dataset = dataset
         self.verbose = verbose
         utils.v_print(verbose, "creating new ParamSet object with")
         utils.v_print(verbose, "  path '{}'".format(self.path))
@@ -422,7 +425,7 @@ class ParamSet:
     def __iter__(self):
         try:
             self._iterator = iter(
-                {item for item in os.listdir(self.path) if not item.startswith(".") and item != "raw"}
+                {g for g in os.listdir(self.path) if not g.startswith(".") and g != "raw"}
             )
         except FileNotFoundError:
             self._iterator = iter(())
@@ -435,17 +438,14 @@ class ParamSet:
         Returns:
             (Group): the next group that has been created under this parameter set.
         """
-        return Group(os.path.join(self.path, next(self._iterator)), self.verbose)
+        return Group(os.path.join(self.path, next(self._iterator)), self, self.verbose)
 
     def __getitem__(self, idx):
         """Allow access by name of Group."""
         if not isinstance(idx, str):
             raise IndexError("Group access is only permitted by str; got {}".format(type(idx)))
 
-        if idx.startswith(".") or idx == "raw" or idx not in os.listdir(self.path):
-            raise FileNotFoundError("no such group found: {}".format(os.path.join(self.path, idx)))
-
-        return Group(os.path.join(self.path, idx), self.verbose)
+        return Group(os.path.join(self.path, idx), self, self.verbose)
 
     def __contains__(self, item):
         return not item.startswith(".") and item != "raw" and item in os.listdir(self.path)
@@ -458,8 +458,8 @@ class Dataset:
         """Store the path to the dataset to allow access to child ParamSets.
 
         Args:
-            path (str): path to dataset; should be a subdirectory of the cache
-                              directory.
+            path (str): path to dataset; should be a subdirectory of the cache directory.
+            generator (callable): dataset generating function decorated with @slurm_gen.dataset.
             verbose (bool): whether to print debug statements.
         """
         self.path = path
@@ -473,7 +473,11 @@ class Dataset:
         self._iterator = None
 
     def __iter__(self):
-        self._iterator = iter(sorted(os.listdir(self.path)))
+        try:
+            self._iterator = iter(sorted(os.listdir(self.path)))
+        except FileNotFoundError:
+            self._iterator = iter(())
+
         return self
 
     def __next__(self):
@@ -482,28 +486,28 @@ class Dataset:
         Returns:
             (ParamSet): the next parameter set that has been generated for this dataset.
         """
-        return ParamSet(os.path.join(self.path, next(self._iterator)), self.verbose)
+        return ParamSet(os.path.join(self.path, next(self._iterator)), self, self.verbose)
 
     def __getitem__(self, idx):
         """Access ParamSets by number, string, ParamObject, or dict of params."""
         elements = list(sorted(os.listdir(self.path)))
 
         if isinstance(idx, int):
-            return ParamSet(os.path.join(self.path, elements[idx]), self.verbose)
+            return ParamSet(os.path.join(self.path, elements[idx]), self, self.verbose)
 
         if isinstance(idx, str):
             if idx not in elements:
                 raise FileNotFoundError(
                     "no such parameter set found: {}".format(os.path.join(self.path, idx))
                 )
-            return ParamSet(os.path.join(self.path, idx), self.verbose)
+            return ParamSet(os.path.join(self.path, idx), self, self.verbose)
 
         if isinstance(idx, utils.DefaultParamObject):
-            return ParamSet(os.path.join(self.path, idx._to_string()), self.verbose)
+            return ParamSet(os.path.join(self.path, idx._to_string()), self, self.verbose)
 
         if isinstance(idx, dict):
             idx = generator.paramClass(**dict)
-            return ParamSet(os.path.join(self.path, idx._to_string()), self.verbose)
+            return ParamSet(os.path.join(self.path, idx._to_string()), self, self.verbose)
 
         raise IndexError(
             "ParamSet access is only permitted with int or str; got {}".format(type(idx))

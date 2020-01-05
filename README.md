@@ -50,8 +50,8 @@ class NoisySineParams(slurm_gen.DefaultParamObject):
 options = "--qos=test"
 
 
-# here we also tell SLURM_gen to save every 50 samples and request 1GB of memory
-@slurm_gen.generator(50, NoisySineParams, "1GB", options)
+# here we also tell SLURM_gen to request 1GB of memory and save every 50 samples
+@slurm_gen.dataset(NoisySineParams, "1GB", 50, options)
 def noisy_sine(size, params):
     """Create samples from a noisy sine wave.
 
@@ -68,7 +68,7 @@ def noisy_sine(size, params):
 
 The `slurm_gen.DefaultParamObject` defines the possible configuration parameters that the generator can accept, as well as the default values for those parameters. When generating or accessing samples, we can specify non-default values for any of these parameters.
 
-The `@slurm_gen.generator` decorator converts `noisy_sine` into a dataset generator which can be used by the `slurm_gen.generate` to create cache files containing arbitrary numbers of samples. We can define as many functions as we like in `datasets.py`, and all those marked with `@slurm_gen.generator` will be usable in SLURM_gen.
+The `@slurm_gen.dataset` decorator converts `noisy_sine` into a dataset generator which can be used by the `slurm_gen.generate` to create cache files containing arbitrary numbers of samples. We can define as many functions as we like in `datasets.py`, and all those marked with `@slurm_gen.dataset` will be usable in SLURM_gen.
 
 #### Generate samples
 
@@ -103,7 +103,7 @@ Param set #1:
        std_dev#0.5|
 ```
 
-We can see the samples for the "noisy_sine" dataset divided by the sets parameters given.
+We can see the samples for the "noisy_sine" dataset divided into sets by the parameters given.
 
 If we want to move some of those samples into a group labeled "train", we can do so like this:
 
@@ -146,5 +146,6 @@ X, y = Cache("./example/")["noisy_sine"][0]["train"].get(1000)
 ## TODO
 
 - Define the object hierarchy in the readme.
+- Get rid of utils.py?
 - Be more efficient with keeping track of the sizes of the datasets.
 - Be able to preprocess on a SLURM job.

@@ -20,8 +20,8 @@ class NoisySineParams(slurm_gen.DefaultParamObject):
 options = "--qos=test"
 
 
-# here we also tell SLURM_gen to save every 50 samples and request 1GB of memory
-@slurm_gen.generator(50, NoisySineParams, "1GB", options)
+# here we also tell SLURM_gen to request 1GB of memory and save every 50 samples
+@slurm_gen.dataset(NoisySineParams, "1GB", 50, options)
 def noisy_sine(size, params):
     """Create samples from a noisy sine wave.
 
@@ -34,3 +34,9 @@ def noisy_sine(size, params):
     """
     for x in np.random.uniform(params.left, params.right, size=size):
         yield x, np.sin(x) + np.random.normal(scale=params.std_dev)
+
+
+@noisy_sine.preprocessor
+def square_both(X, y):
+    """Square both the inputs and the outputs."""
+    return [ex ** 2 for ex in X], [wai ** 2 for wai in y]
