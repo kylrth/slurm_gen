@@ -7,6 +7,7 @@ Kyle Roth. 2019-10-30.
 
 
 import argparse
+import os
 import sys
 
 from slurm_gen.data_objects import Cache
@@ -94,7 +95,7 @@ def _list(dataset=None, verbose=False):
         divider = "-" * 80 + "\n"
         did_print = False
 
-        for d_set in Cache(verbose):
+        for d_set in Cache(os.getcwd(), verbose):
             if did_print:
                 print(divider)
             print("{}:".format(d_set.name))
@@ -105,12 +106,12 @@ def _list(dataset=None, verbose=False):
             print("No datasets found. Generate one!")
     else:
         # get list the one dataset
-        single_list(Cache(verbose)[dataset])
+        single_list(Cache(os.getcwd(), verbose)[dataset])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="command line interface for listing samples in the cache",
+        description="list samples in the cache for the current directory",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
