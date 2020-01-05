@@ -571,21 +571,21 @@ class Cache:
 
         if isinstance(idx, int):
             return Dataset(
-                os.path.join(self.path, elements[idx].__name__), elements[idx], self.verbose
+                os.path.join(self.cache_path, elements[idx].__name__), elements[idx], self.verbose
             )
 
         if isinstance(idx, str):
             for generator in elements:
                 if generator.__name__ == idx:
-                    return Dataset(os.path.join(self.path, idx), generator, self.verbose)
+                    return Dataset(os.path.join(self.cache_path, idx), generator, self.verbose)
             raise FileNotFoundError(
-                "no such dataset found: {}".format(os.path.join(self.path, idx))
+                "no dataset '{}' found in {}/datasets.py".format(idx, self.path)
             )
 
-        if callable(idx):
+        if utils.is_generator(idx):
             # data generating function
             return Dataset(os.path.join(self.path, idx.__name__), idx, self.verbose)
 
         raise IndexError(
-            "Dataset access is only permitted with int or str; got {}".format(type(idx))
+            "dataset access only permitted with int, str, or a generator; got {}".format(type(idx))
         )

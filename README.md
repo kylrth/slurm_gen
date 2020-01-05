@@ -72,16 +72,15 @@ The `@slurm_gen.generator` decorator converts `noisy_sine` into a dataset genera
 
 #### Generate samples
 
-Now that we've defined the generator, we can generate a thousand samples for that dataset like this:
+Now that we've defined the generator, we can generate some samples for that dataset like this:
 
 ```bash
 cd example/
-python -m slurm_gen.generate noisy_sine -n 1000 -njobs 40 --params "{'left': 0, 'std_dev': 0.5}" --time "30" --verbose
+python -m slurm_gen.generate noisy_sine -n 1000 -njobs 40 --time "30"
+python -m slurm_gen.generate noisy_sine -n 1000 -njobs 40 --params "{'left': 0, 'std_dev': 0.5}"
 ```
 
-In the example above, we submitted 40 SLURM jobs, splitting the 1000 samples evenly among them. We set some configuration parameters to non-default values, and each job received thirty minutes of run time.
-
-If we don't provide `--time`, a value three standard deviations above the mean of previous runs is used, adapted to the number of samples per job. If this is the first time this dataset is being generated with this set of config parameters, `--time` must be specified.
+In the first example above, we submitted 40 SLURM jobs, splitting the 1000 samples evenly among them. Since we have no samples for this dataset yet, we had to provide `--time`. In the second example, we omitted the `--time` argument, and a value three standard deviations above the mean of previous runs was used, adapted to the number of samples per job. In the second example we also set some configuration parameters to non-default values, and each job received thirty minutes of run time.
 
 #### Managing samples
 
@@ -95,23 +94,43 @@ python -m slurm_gen.list
 The output will look like this:
 
 ```txt
-[TODO]
+noisy_sine:
+Param set #0:
+    left#-1|right#1| raw: 1000
+        std_dev#0.1|
+Param set #1:
+    left#0|right#1| raw: 1000
+       std_dev#0.5|
 ```
+
+We can see the samples for the "noisy_sine" dataset divided by the sets parameters given.
 
 If we want to move some of those samples into a group labeled "train", we can do so like this:
 
 ```bash
 cd example/
-python -m slurm_gen.move noisy_sine 1000 train
+python -m slurm_gen.move noisy_sine 700 train -p 0
 ```
+
+The `-p` argument identifies which parameter set to use. You can also use a dictionary string as the identifier.
 
 After the move, the output of `python -m slurm_gen.list` will be
 
 ```txt
-[TODO]
+noisy_sine:
+Param set #0:
+    left#-1|right#1| raw: 300
+        std_dev#0.1| train: unprocessed(700)
+Param set #1:
+    left#0|right#1| raw: 1000
+       std_dev#0.5|
 ```
 
 Once you've moved samples into a labeled group, you can't move them back.
+
+#### Preprocessing samples
+
+You may have noticed that `slurm_gen.list` noted 700 "unprocessed" samples. Once samples are in a group, you can
 
 #### Accessing the samples
 
@@ -126,4 +145,6 @@ X, y = Cache("./example/")["noisy_sine"][0]["train"].get(1000)
 
 ## TODO
 
+- Define the object hierarchy in the readme.
 - Be more efficient with keeping track of the sizes of the datasets.
+- Be able to preprocess on a SLURM job.
