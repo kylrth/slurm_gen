@@ -1,6 +1,6 @@
-"""Helper decorator that must be applied to data generating functions.
+"""Helper decorator that must be applied to datasets.
 
-Each generating function should have call signature (size, params), where size is the number of
+Each dataset function should have call signature (size, params), where size is the number of
 examples to produce and params is a dict of parameters to accept.
 
 Kyle Roth. 2019-05-17.
@@ -17,38 +17,34 @@ from slurm_gen import utils
 
 class objectless:
     """Base class for classes not to be instantiated."""
+
     def __new__(cls, *args, **kwargs):
         raise RuntimeError("{} should not be instantiated".format(cls))
 
 
 def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
-    """Create a decorator that turns a data generating function into one that stores data in the raw
-    cache, caching every cache_every data points.
+    """Create a decorator that turns a data generating function into a SLURM_gen dataset.
 
     Args:
-        ParamClass (class): class name of the parameter object that the function accepts. Must have
-                            a _to_string() method that creates a string of the parameter values, and
-                            a constructor that creates a new object from a dict of params that
-                            override defaults. It suffices to be a subclass of
-                            utils.DefaultParamObject.
+        ParamClass (class): class name of the parameter object that the function accepts. Must be a
+                            subclass of slurm_gen.utils.DefaultParamObject.
         mem (str): string describing the memory to assign to each CPU in a SLURM job, e.g. "2GB".
-        cache_freq (int): number of data points to load between caching.
-        slurm_opts (str): extra parameters to pass to the `sbatch` command when generating.
+        cache_freq (int): number of data points to cache at a time.
+        slurm_opts (str): extra parameters to pass to the `sbatch` command when generating samples.
         bash_cmds (iterable(str)): lines of bash commands to insert in each job before calling the
-                                   generator. A useful example is `module load python/3.6`.
+                                   generating function. A useful example is
+                                   `module load python/3.6`.
     Returns:
         (decorator): decorator for a generating function that creates the dataset as described.
     """
 
     def decorator(f):
-        """Turn a data generating function into one that stores data in the raw cache, caching every
-        cache_every data points.
+        """Turn a data generating function into a SLURM_gen dataset with the specified parameters.
 
         Args:
             f (function): data generating function with call signature (size, params).
         Returns:
-            (function): data generating function that stores the output of the original function in
-                        the cache.
+            dataset.
         """
 
         class Wrapper(objectless):
@@ -140,15 +136,21 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
                 Args:
                     func (callable): preprocessing function.
                 Returns:
-                    (callable): wrapped function.
+                    wrapped function with `call` method.
                 """
+
+                if hasattr(func, "datasets") and hasattr(func, "call"):
+                    # func has already been tagged as a preprocessor for another dataset, so just
+                    # add to the set of datasets it applies to
+                    func.datasets.add(cls)
+                    return func
 
                 class Inner(objectless):
                     """This class should remain static and replaces the preprocessing function
                     defined by the user in their dataset module."""
 
                     # mark this preprocessor as a preprocessor for this dataset
-                    dataset = cls
+                    datasets = {cls}
 
                     @staticmethod
                     def call(X, y):

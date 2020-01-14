@@ -272,16 +272,13 @@ def get_dataset_dir(cache_dir, name, params):
     return os.path.join(cache_dir, ".slurm_cache", name, params._to_string())
 
 
-def get_SLURM_output_dir(module):
-    """Get the absolute path of the directory where data generation jobs should place
-    their output for this module.
+def get_SLURM_output_dir():
+    """Get the absolute path of the directory where data generation jobs should place their output.
 
     Returns:
         (str): the absolute path.
     """
-    return os.path.join(
-        os.path.dirname(os.path.abspath(module)), ".slurm_gen_cache", ".slurm_output"
-    )
+    return os.path.join(os.getcwd(), ".slurm_gen_cache", ".slurm_output")
 
 
 def get_unique_filename():

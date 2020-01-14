@@ -1,9 +1,9 @@
 import numpy as np
 
-import slurm_gen
+from slurm_gen import DefaultParamObject, dataset
 
 
-class NoisySineParams(slurm_gen.DefaultParamObject):
+class NoisySineParams(DefaultParamObject):
     """Attributes defining parameters to the noisy_sine experiment."""
 
     # leftmost allowed value for x
@@ -21,7 +21,7 @@ options = "--qos=test"
 
 
 # here we also tell SLURM_gen to request 1GB of memory and save every 50 samples
-@slurm_gen.dataset(NoisySineParams, "1GB", 50, options)
+@dataset(NoisySineParams, "1GB", 50, options)
 def noisy_sine(size, params):
     """Create samples from a noisy sine wave.
 

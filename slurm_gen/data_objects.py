@@ -225,6 +225,12 @@ class Group:
         count = proc_set.size
         current_proc_files = set(os.listdir(proc_set.path))
 
+        preprocessor = utils.get_preprocessor(
+            name,
+            self.paramSet.dataset.name,
+            os.path.dirname(os.path.dirname(self.paramSet.dataset.path)),
+        )
+
         # preprocess files, skipping those that are already preprocessed
         for file in unproc_files:
             if count >= size:
@@ -232,10 +238,12 @@ class Group:
             if file in current_proc_files:
                 continue
 
-            # preprocess it!
             X, y = utils.from_pickle(os.path.join(self.path, file), self.verbose)
             count += len(X)
-            X, y = func(X, y)
+
+            # preprocess it!
+            X, y = preprocessor.call(X, y)
+
             utils.to_pickle((X, y), os.path.join(proc_set.path, file))
 
         # invalidate the metadata file

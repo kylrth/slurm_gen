@@ -91,43 +91,57 @@ def create_SLURM_command(generator, size, params, SLURM_out):
     return command
 
 
-def _generate_with_SLURM(generator, size, params, njobs=1, job_time=None, verbose=False):
-    """Using SLURM, generate `size` samples of the dataset, using the generation
-    function defined in datasets.py.
+def _get_sample_time(generator, params, verbose):
+    """Determine the time required to generate a single sample, adjusted two standard deviations
+    above the mean.
 
     Args:
-        generator (callable): dataset generating function. A function from `datasets.py` in the
-                              current directory.
+        generator (class): dataset generating function. A dataset from `datasets.py` in the current
+                           directory.
+        params (utils.DefaultParamObject): parameter object to pass to generating function.
+        verbose (bool): whether to print debug statements.
+    Returns:
+        (float): number of seconds required to generate a single sample, + two standard deviations.
+    """
+    try:
+        per_save = Cache(os.getcwd(), verbose)[generator][params._to_string()].time_per_save
+    except FileNotFoundError:
+        try:
+            per_save = Cache(os.getcwd(), verbose)[generator][0].time_per_save
+            print("No time data is stored for this parameter set.")
+            yes = input("Would you like to use time data from another parameter set? (Y/n): ")
+            if yes.lower() in {"n", "no"}:
+                raise ValueError("no time data for this param set; --time must be provided")
+        except FileNotFoundError:
+            raise ValueError("no time data for this dataset; --time must be provided")
+    utils.v_print(verbose, "two standard deviations above the mean is {}s".format(per_save))
+
+    per_sample = per_save / generator.cache_every
+    utils.v_print(verbose, "\tper sample: {}s".format(per_sample))
+
+    return per_sample
+
+
+def _generate_with_SLURM(generator, size, params, njobs=1, job_time=None, verbose=False):
+    """Using SLURM, generate `size` samples of the dataset.
+
+    Args:
+        generator (class): dataset generating function. A dataset from `datasets.py` in the current
+                           directory.
         size (int): number of samples to generate.
         params (utils.DefaultParamObject): parameter object to pass to generating function.
         njobs (int): number of SLURM jobs to use to generate the data.
-        job_time (str): time for each batch job, as described in docstring for generate.
+        job_time (str): time for each batch job, or None if adapted from metrics.
         verbose (bool): whether to print debug statements.
     """
     _remove_metadata(generator.__name__, params, verbose)
 
-    SLURM_out = utils.get_SLURM_output_dir(generator.__name__)
+    SLURM_out = utils.get_SLURM_output_dir()
     os.makedirs(SLURM_out, exist_ok=True)
 
     per_sample = None
     if job_time is None:
-        # use the second deviation above the mean generating time
-
-        try:
-            per_save = Cache(os.getcwd(), verbose)[generator][params._to_string()].time_per_save
-        except FileNotFoundError:
-            try:
-                per_save = Cache(os.getcwd(), verbose)[generator][0].time_per_save
-                print("No time data is stored for this parameter set.")
-                yes = input("Would you like to use time data from another parameter set? (Y/n): ")
-                if yes.lower() in {"n", "no"}:
-                    raise ValueError("no time data for this param set; --time must be provided")
-            except FileNotFoundError:
-                raise ValueError("no time data for this dataset; --time must be provided")
-        utils.v_print(verbose, "two standard deviations above the mean is {}s".format(per_save))
-
-        per_sample = per_save / generator.cache_every
-        utils.v_print(verbose, "\tper sample: {}s".format(per_sample))
+        per_sample = _get_sample_time(generator, params, verbose)
 
     for nsamples in utils.samples_to_jobs(size, njobs):
         # nsamples is the number of samples each job should generate
@@ -162,14 +176,11 @@ def generate(dataset, n, params, njobs=1, job_time=None, this_node=False, verbos
     Args:
         dataset (str): name of the data generating function. The function must be defined in a file
                        named `datasets.py` in the current directory, and must have the
-                       `slurm_gen.generator` decorator.
+                       `slurm_gen.dataset` decorator.
         n (int): number of data points to generate.
         params (dict): parameters to be passed to the data generator.
         njobs (int): number of SLURM jobs to submit. Each job will produce around n / njobs samples.
-        job_time (str): time for each job to run. Acceptable time formats include "MM", "MM:SS",
-                    "HH:MM:SS", "D-HH", "D-HH:MM" and "D-HH:MM:SS". If not provided, the second
-                    standard deviation above the mean of previous runs is used (adapted to the
-                    number of samples per job).
+        job_time (str): time for each job to run, or None for time adapted from metrics.
         this_node (bool): if True, the data is generated in the current process instead of on SLURM.
                           This ignores all SLURM options.
         verbose (bool): print debug-level information from all functions.
@@ -200,29 +211,29 @@ if __name__ == "__main__":
     parser.add_argument(
         "--njobs",
         type=int,
-        required="--this_node" not in sys.argv,  # only require if submitting to SLURM
-        help="number of SLURM jobs to submit. " "Each job will produce about n/njobs samples",
+        required="--this-node" not in sys.argv,  # only require if submitting to SLURM
+        help="number of SLURM jobs to submit. Each job will produce about n/njobs samples",
     )
     parser.add_argument(
-        "--mem_per_cpu",
+        "--mem-per-cpu",
         type=str,
-        required="--this_node" not in sys.argv,  # only require if submitting to SLURM
-        help='memory to assign to each CPU in a SLURM job, e.g. "2GB"',
+        required="--this-node" not in sys.argv,  # only require if submitting to SLURM
+        help="memory to assign to each CPU in a SLURM job, e.g. '2GB'",
     )
 
     # optional arguments
     parser.add_argument(
-        "--this_node",
+        "--this-node",
         action="store_true",
-        help="run the data-generating code in this process, instead of submitting it to SLURM. "
-        "This ignores all SLURM options.",
+        help="run the data-generating code in the current process, instead of submitting it as a "
+        "SLURM job. This ignores all SLURM options.",
     )
     parser.add_argument(
         "-p",
         "--params",
         type=ast.literal_eval,
         default={},
-        help="dict to be passed as params to the data generator.",
+        help="dict to be passed as params to the dataset.",
     )
     parser.add_argument(
         "-t",
