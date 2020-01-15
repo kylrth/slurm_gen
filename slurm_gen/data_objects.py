@@ -62,19 +62,23 @@ class InsufficientSamplesError(Exception):
 class PreprocessedData:
     """Represents a single list of data samples, preprocessed by a specific preprocessor."""
 
-    def __init__(self, path, verbose=False):
+    def __init__(self, path, preprocessor, verbose=False):
         """Store the path to the data.
 
         Args:
             path (str): path to the directory containing pickle files with the processed data.
+            preprocessor (class): preprocessor for this set.
             verbose (bool): whether to print debug statements.
         """
         self.path = path
+        self.preprocessor = preprocessor
         self.name = os.path.basename(os.path.normpath(self.path))
         self.verbose = verbose
         utils.v_print(verbose, "creating new PreprocessedData object with")
         utils.v_print(verbose, "  path '{}'".format(self.path))
         utils.v_print(verbose, "  and name '{}'".format(self.name))
+
+        self._size = None
 
     @property
     def size(self):
@@ -83,6 +87,9 @@ class PreprocessedData:
         Returns:
             (int)
         """
+        if self._size is not None:
+            return self._size
+
         # try to read it from the metadata file
         metadata_path = os.path.join(self.path, ".metadata")
         if os.path.isfile(metadata_path):
@@ -90,18 +97,22 @@ class PreprocessedData:
             with open(metadata_path) as infile:
                 for line in infile:
                     if line.startswith("size: "):
-                        size = int(line.split(": ")[1])
-                        return size
+                        self._size = int(line.split(": ")[1])
+                        return self._size
 
         # count the number by hand
-        size = utils.count_samples(self.path, self.verbose)
+        try:
+            self._size = utils.count_samples(self.path, self.verbose)
+        except FileNotFoundError:
+            os.makedirs(self.path, exist_ok=True)
+            self._size = 0
 
         # store it in the metadata file
-        utils.v_print(self.verbose, "writing size '{}' to '{}'".format(size, metadata_path))
+        utils.v_print(self.verbose, "writing size '{}' to '{}'".format(self._size, metadata_path))
         with open(metadata_path, "a+") as outfile:
-            outfile.write("size: {}\n".format(size))
+            outfile.write("size: {}\n".format(self._size))
 
-        return size
+        return self._size
 
     def get(self, size=None):
         """Return `size` samples from this preprocessed dataset.
@@ -130,23 +141,24 @@ class Group:
     """Represents a group of data samples, and contains references to all contained
     PreprocessedData."""
 
-    def __init__(self, path, paramSet, verbose=False):
+    def __init__(self, path, preprocessors, verbose=False):
         """Store the path to the group, to allow access to raw data.
 
         Args:
             path (str): path to group; should contain pickle files for the unprocessed set and
                         directories for each preprocessed set.
-            paramSet (ParamSet): param set this group belongs to.
+            preprocessors (list(class)): preprocessors for this dataset.
             verbose (bool): whether to print debug statements.
         """
         self.path = path
-        self.paramSet = paramSet
+        self.preprocessors = preprocessors
         self.name = os.path.basename(os.path.normpath(path))
         self.verbose = verbose
         utils.v_print(verbose, "creating new Group object with")
         utils.v_print(verbose, "  path '{}'".format(self.path))
         utils.v_print(verbose, "  and name '{}'".format(self.name))
 
+        self._unprocessed_size = None
         self._iterator = None
 
     @property
@@ -156,6 +168,9 @@ class Group:
         Returns:
             (int)
         """
+        if self._unprocessed_size is not None:
+            return self._unprocessed_size
+
         # try to read it from the metadata file
         metadata_path = os.path.join(self.path, ".metadata")
         if os.path.isfile(metadata_path):
@@ -163,20 +178,20 @@ class Group:
             with open(metadata_path) as infile:
                 for line in infile:
                     if line.startswith("size:"):
-                        unprocessed_size = int(line.split(": ")[1])
-                        return unprocessed_size
+                        self._unprocessed_size = int(line.split(": ")[1])
+                        return self._unprocessed_size
 
         # count the number by hand
-        unprocessed_size = utils.count_samples(self.path, self.verbose)
+        self._unprocessed_size = utils.count_samples(self.path, self.verbose)
 
         # store it in the metadata file
         utils.v_print(
-            self.verbose, "writing size '{}' to '{}'".format(unprocessed_size, metadata_path)
+            self.verbose, "writing size '{}' to '{}'".format(self._unprocessed_size, metadata_path)
         )
         with open(metadata_path, "a+") as outfile:
-            outfile.write("size: {}\n".format(unprocessed_size))
+            outfile.write("size: {}\n".format(self._unprocessed_size))
 
-        return unprocessed_size
+        return self._unprocessed_size
 
     def get(self, size=None):
         """Get `size` samples from the unprocessed set.
@@ -216,8 +231,7 @@ class Group:
         # get unprocessed data
         unproc_files = sorted(file for file in os.listdir(self.path) if file.endswith(".pkl"))
 
-        # make sure the PreprocessedData exists
-        os.makedirs(os.path.join(self.path, name), exist_ok=True)
+        # make sure the PreprocessedData exists, by trying to get it
         proc_set = self[name]
 
         # get the current size of the PreprocessedData and the individual files which
@@ -225,11 +239,7 @@ class Group:
         count = proc_set.size
         current_proc_files = set(os.listdir(proc_set.path))
 
-        preprocessor = utils.get_preprocessor(
-            name,
-            self.paramSet.dataset.name,
-            os.path.dirname(os.path.dirname(self.paramSet.dataset.path)),
-        )
+        preprocessor = proc_set.preprocessor
 
         # preprocess files, skipping those that are already preprocessed
         for file in unproc_files:
@@ -253,13 +263,19 @@ class Group:
             pass
 
     def __iter__(self):
-        self._iterator = iter(
-            utils.get_preprocessors(
-                self.generator, os.path.dirname(os.path.dirname(self.paramSet.dataset.path))
-            )
-        )
-
+        self._iterator = iter(self.preprocessors)
         return self
+
+    def _make_preprocessed_data(self, name, preproc):
+        """Create a new PreprocessedData object from the given name and preprocessor.
+
+        Args:
+            name (str): name of preprocessor.
+            preproc (class): preprocessor defined in datasets.py.
+        Returns:
+            (PreprocessedData)
+        """
+        return PreprocessedData(os.path.join(self.path, name), preproc, self.verbose)
 
     def __next__(self):
         """Iterate over the PreprocessedData for this Group.
@@ -268,37 +284,39 @@ class Group:
             (PreprocessedData): the next preprocessed data that has been created under this group.
         """
         preproc = next(self._iterator)
-        return PreprocessedData(os.path.join(self.path, preproc.__name__), preproc, self.verbose)
+        return self._make_preprocessed_data(preproc.__name__, preproc)
 
     def __getitem__(self, idx):
         """Allow access by name of PreprocessedData."""
-        if not isinstance(idx, str):
-            raise IndexError(
-                "Preprocessed set access only permitted by str; got {}".format(type(idx))
-            )
+        if isinstance(idx, str):
+            for preproc in self.preprocessors:
+                if preproc.__name__ == idx:
+                    return self._make_preprocessed_data(idx, preproc)
+            raise IndexError("preprocessor '{}' not found for this dataset".format(idx))
 
-        preproc = utils.get_preprocessor(
-            idx,
-            self.paramSet.dataset.generator,
-            os.path.dirname(os.path.dirname(self.paramSet.dataset.path)),
+        if utils.is_preprocessor(idx):
+            if idx in self.preprocessors:
+                return self._make_preprocessed_data(idx.__name__, idx)
+
+        raise IndexError(
+            "Preprocessed set access permitted by str or preprocessor; got {}".format(type(idx))
         )
-        return PreprocessedData(os.path.join(self.path, idx), preproc, self.verbose)
 
 
 class ParamSet:
     """Represents a parameter set with all its datasets beneath it."""
 
-    def __init__(self, path, dataset, verbose=False):
+    def __init__(self, path, preprocessors, verbose=False):
         """Store the path to the param set to allow access to child Groups and raw data.
 
         Args:
             path (str): path to parameter set; should be a subdirectory of a dataset directory.
-            dataset (Dataset): the dataset this ParamSet belongs to.
+            preprocessors (list(class)): preprocessors belonging to this dataset.
             verbose (bool): whether to print debug statements.
         """
         self.path = path
         self.name = os.path.basename(os.path.normpath(path))
-        self.dataset = dataset
+        self.preprocessors = preprocessors
         self.verbose = verbose
         utils.v_print(verbose, "creating new ParamSet object with")
         utils.v_print(verbose, "  path '{}'".format(self.path))
@@ -440,20 +458,30 @@ class ParamSet:
 
         return self
 
+    def _make_group(self, name):
+        """Create a new Group object by appending the name to self.path.
+
+        Args:
+            name (str): name of group.
+        Returns:
+            (Group)
+        """
+        return Group(os.path.join(self.path, name), self.preprocessors, self.verbose)
+
     def __next__(self):
         """Iterate over the Groups for this ParamSet.
 
         Returns:
             (Group): the next group that has been created under this parameter set.
         """
-        return Group(os.path.join(self.path, next(self._iterator)), self, self.verbose)
+        return self._make_group(next(self._iterator))
 
     def __getitem__(self, idx):
         """Allow access by name of Group."""
         if not isinstance(idx, str):
             raise IndexError("Group access is only permitted by str; got {}".format(type(idx)))
 
-        return Group(os.path.join(self.path, idx), self, self.verbose)
+        return self._make_group(idx)
 
     def __contains__(self, item):
         return not item.startswith(".") and item != "raw" and item in os.listdir(self.path)
@@ -462,16 +490,17 @@ class ParamSet:
 class Dataset:
     """Represents a dataset with all its parameter sets beneath it."""
 
-    def __init__(self, path, generator, verbose=False):
+    def __init__(self, path, dataset, verbose=False):
         """Store the path to the dataset to allow access to child ParamSets.
 
         Args:
             path (str): path to dataset; should be a subdirectory of the cache directory.
-            generator (callable): dataset generating function decorated with @slurm_gen.dataset.
+            dataset (class): dataset decorated with @slurm_gen.dataset.
             verbose (bool): whether to print debug statements.
         """
         self.path = path
-        self.generator = generator
+        self.dataset = dataset
+        self.preprocessors = utils.get_preprocessors(dataset)
         self.name = os.path.basename(os.path.normpath(self.path))
         self.verbose = verbose
         utils.v_print(verbose, "creating new Dataset object with")
@@ -488,34 +517,44 @@ class Dataset:
 
         return self
 
+    def _make_ParamSet(self, param_str):
+        """Create a new ParamSet object by appending the param_str to self.path.
+
+        Args:
+            param_str (str): a subdirectory of the dataset dir.
+        Returns:
+            (ParamSet)
+        """
+        return ParamSet(os.path.join(self.path, param_str), self.preprocessors, self.verbose)
+
     def __next__(self):
         """Iterate over the ParamSets for this dataset.
 
         Returns:
             (ParamSet): the next parameter set that has been generated for this dataset.
         """
-        return ParamSet(os.path.join(self.path, next(self._iterator)), self, self.verbose)
+        return self._make_ParamSet(next(self._iterator))
 
     def __getitem__(self, idx):
         """Access ParamSets by number, string, ParamObject, or dict of params."""
         elements = list(sorted(os.listdir(self.path)))
 
         if isinstance(idx, int):
-            return ParamSet(os.path.join(self.path, elements[idx]), self, self.verbose)
+            return self._make_ParamSet(elements[idx])
 
         if isinstance(idx, str):
             if idx not in elements:
                 raise FileNotFoundError(
                     "no such parameter set found: {}".format(os.path.join(self.path, idx))
                 )
-            return ParamSet(os.path.join(self.path, idx), self, self.verbose)
+            return self._make_ParamSet(idx)
 
         if isinstance(idx, utils.DefaultParamObject):
-            return ParamSet(os.path.join(self.path, idx._to_string()), self, self.verbose)
+            return self._make_ParamSet(idx._to_string())
 
         if isinstance(idx, dict):
             idx = generator.paramClass(**dict)
-            return ParamSet(os.path.join(self.path, idx._to_string()), self, self.verbose)
+            return self._make_ParamSet(idx._to_string())
 
         raise IndexError(
             "ParamSet access is only permitted with int or str; got {}".format(type(idx))
@@ -529,7 +568,7 @@ class Cache:
         """Initialize the cache in this location.
 
         Args:
-            path (str): path to the directory where modules exist.
+            path (str): path to the directory where datasets.py exists.
             verbose (bool): whether to print debug statements.
         """
         self.path = path
@@ -539,34 +578,33 @@ class Cache:
         utils.v_print(verbose, "creating new Cache object with path '{}'".format(self.path))
 
         self._iterator = None
-        self._generators = None
-
-    @property
-    def generators(self):
-        """Get generators defined in `datasets.py`.
-
-        Returns:
-            (list(callable)): generating functions for each dataset.
-        """
-        if self._generators is None:
-            self._generators = utils.get_generators(self.path)
-        return self._generators
+        self._datasets = None
 
     @property
     def datasets(self):
-        """Get names of the datasets defined in `datasets.py`.
+        """Get datasets defined in `datasets.py`.
 
         Returns:
-            (list(str)): names of datasets.
+            (list(class)): datasets.
         """
-        out = []
-        for generator in self.generators:
-            out.append(generator.__name__)
-        return out
+        if self._datasets is None:
+            self._datasets = utils.get_datasets(self.path)
+        return self._datasets
 
     def __iter__(self):
-        self._iterator = iter(sorted(self.generators))
+        self._iterator = iter(sorted(self.datasets))
         return self
+
+    def _make_dataset(self, name, dataset):
+        """Create a new Dataset object for the dataset by appending name to self.path.
+
+        Args:
+            name (str): name of dataset.
+            dataset (class): dataset defined in datasets.py.
+        Returns:
+            (Dataset)
+        """
+        return Dataset(os.path.join(self.cache_path, name), dataset, self.verbose)
 
     def __next__(self):
         """Iterate over datasets defined in this directory.
@@ -574,29 +612,27 @@ class Cache:
         Returns:
             (Dataset): the next dataset in the cache.
         """
-        generator = next(self._iterator)
-        return Dataset(os.path.join(self.cache_path, generator.__name__), generator, self.verbose)
+        dataset = next(self._iterator)
+        return self._make_dataset(dataset.__name__, dataset)
 
     def __getitem__(self, idx):
         """Access either by name of Dataset or by index."""
-        elements = list(sorted(self.generators))
+        elements = list(sorted(self.datasets))
 
         if isinstance(idx, int):
-            return Dataset(
-                os.path.join(self.cache_path, elements[idx].__name__), elements[idx], self.verbose
-            )
+            return self._make_dataset(datasets[idx].__name__, datasets[idx])
 
         if isinstance(idx, str):
-            for generator in elements:
-                if generator.__name__ == idx:
-                    return Dataset(os.path.join(self.cache_path, idx), generator, self.verbose)
+            for dataset in elements:
+                if dataset.__name__ == idx:
+                    return self._make_dataset(idx, dataset)
             raise FileNotFoundError(
                 "no dataset '{}' found in {}/datasets.py".format(idx, self.path)
             )
 
-        if utils.is_generator(idx):
-            # data generating function
-            return Dataset(os.path.join(self.path, idx.__name__), idx, self.verbose)
+        if utils.is_dataset(idx):
+            # the dataset itself
+            return self._make_dataset(idx.__name__, idx)
 
         raise IndexError(
             "dataset access only permitted with int, str, or a generator; got {}".format(type(idx))

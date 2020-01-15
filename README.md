@@ -145,7 +145,7 @@ Note that the preprocessor is defined for one particular dataset. If the same pr
 Preprocess some samples from 'train' by running the following command:
 
 ```bash
-python -m slurm_gen.preprocess noisy_sine square_both train 600
+python -m slurm_gen.preprocess noisy_sine square_both train 600 -p 0
 ```
 
 After the data is preprocessed, the output of `python -m slurm_gen.list` will be

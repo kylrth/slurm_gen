@@ -150,15 +150,15 @@ def _import_datasets(path):
     return mod
 
 
-def is_generator(obj):
-    """Determine whether the object is a data generating function wrapped with @slurm_gen.generator.
+def is_dataset(obj):
+    """Determine whether the object is a dataset wrapped with @slurm_gen.dataset.
 
     Args:
         obj
     Returns:
         (bool): whether it is a data generating function.
     """
-    if not callable(obj):
+    if not hasattr(obj, "call"):
         return False
     if not hasattr(obj, "param_class"):
         return False
@@ -169,8 +169,8 @@ def is_generator(obj):
     return hasattr(obj, "bash_commands")
 
 
-def get_generators(path="."):
-    """Return the generator functions defined in the `datasets.py` module in the given directory.
+def get_datasets(path="."):
+    """Return the datasets defined in the `datasets.py` module in the given directory.
 
     Args:
         path (str): directory to search.
@@ -179,34 +179,54 @@ def get_generators(path="."):
     """
     mod = _import_datasets(path)
 
-    # collect the generators
+    # collect the datasets
     out = []
     for var in dir(mod):
-        if is_generator(getattr(mod, var)):
+        if is_dataset(getattr(mod, var)):
             out.append(getattr(mod, var))
 
     return out
 
 
-def get_generator(name, path=os.getcwd()):
-    """Get the generator function by name as defined in the `datasets.py` module in the given
-    directory.
+def get_dataset(name, path=os.getcwd()):
+    """Get the dataset by name as defined in the `datasets.py` module in the given directory.
 
     Args:
         name (str): name of function.
         path (str): directory to search.
     Returns:
-        (callable): generating function.
+        (class): dataset.
     """
     mod = _import_datasets(path)
 
     # ensure it's a generator
-    if not is_generator(getattr(mod, name)):
+    if not is_dataset(getattr(mod, name)):
         raise ValueError(
             "no dataset '{}' found; was it wrapped with @slurm_gen.dataset?".format(name)
         )
 
     return getattr(mod, name)
+
+
+def is_preprocessor(obj):
+    """Determine whether the object is a preprocessor wrapped with @d.preprocessor where d is some
+    dataset.
+
+    Args:
+        obj
+    Returns:
+        (bool): whether it is a data generating function.
+    """
+    if not hasattr(obj, "call"):
+        return False
+    if not hasattr(obj, "datasets"):
+        return False
+    if not isinstance(obj.datasets, set):
+        return False
+    for dataset in obj.datasets:
+        if not is_dataset(dataset):
+            return False
+    return True
 
 
 def get_preprocessors(dataset, path=os.getcwd()):
@@ -223,7 +243,7 @@ def get_preprocessors(dataset, path=os.getcwd()):
     # collect the preprocessors, filtering for the given dataset
     out = []
     for var in dir(mod):
-        if hasattr(getattr(mod, var), "dataset") and getattr(mod, var).dataset == dataset:
+        if is_preprocessor(getattr(mod, var)):
             out.append(getattr(mod, var))
 
     return out
@@ -240,10 +260,10 @@ def get_preprocessor(name, dataset, path=os.getcwd()):
     """
     mod = _import_datasets(path)
 
-    if not hasattr(getattr(mod, name), "dataset") or getattr(mod, name).dataset != dataset:
+    if not is_preprocessor(getattr(mod, name)):
         raise ValueError(
-            "no preprocessor '{}' found; was it wrapped with @{}.preprocessor?".format(
-                name, dataset.__name__
+            "no preprocessor '{p}' found for '{d}'; was it wrapped with @{d}.preprocessor?".format(
+                p=name, d=dataset.__name__
             )
         )
 
@@ -546,3 +566,29 @@ def get_counts(dataset, verbose=False):
                 )
 
     return out
+
+
+def paramSetIdentifier(arg):
+    """Convert the argument string to a unique identifier of a parameter set.
+
+    Possible arguments are:
+    - a whole number identifier (0, 1, 2, ...)
+    - a string that ast.literal_eval can convert to a dictionary
+      (e.g. "{'left': 0, 'std_dev': 0.5}")
+    - a string created by a ParamObject (e.g. "left#0|right#1|std_dev#0.5")
+    """
+    # whole number identifier
+    try:
+        return int(arg)
+    except ValueError:
+        pass
+
+    # dictionary
+    try:
+        return ast.literal_eval(arg)
+    except ValueError:
+        pass
+
+    # ParamObject string
+    dataset = utils.get_dataset(sys.argv[1])
+    return dataset.paramClass._from_string(arg)

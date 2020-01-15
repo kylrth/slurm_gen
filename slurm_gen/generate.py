@@ -24,29 +24,29 @@ def _remove_metadata(dataset, params, verbose=False):
     """Invalidate any record of the number of raw samples for the dataset and param set.
 
     Args:
-        dataset (str): name of the generator for this dataset.
+        dataset (class): dataset defined in datasets.py.
         params (dict): parameter dict for generating function.
     """
     param_str = params._to_string()
     try:
-        os.remove(os.path.join(".slurm_cache", dataset, param_str, "raw", ".metadata"))
+        os.remove(os.path.join(".slurm_cache", dataset.__name__, param_str, "raw", ".metadata"))
     except FileNotFoundError:
         pass
 
 
-def _generate_here(generator, size, params, verbose=False):
+def _generate_here(dataset, size, params, verbose=False):
     """Using the current process, generate `size` samples of the dataset, using the
     generation function defined in datasets.py.
 
     Args:
-        generator (callable): data generating function.
+        dataset (class): dataset defined in datasets.py.
         size (int): number of samples to generate.
         params (dict): parameter dict to pass to generating function.
     """
-    _remove_metadata(generator.__name__, params, verbose)
+    _remove_metadata(dataset, params, verbose)
 
     # generate the data
-    generator.call(size, params.__dict__)
+    dataset.call(size, params.__dict__)
 
 
 # the base string for submitting a data generation job to SLURM
@@ -59,12 +59,11 @@ python3 -u -c "from {this}.utils import get_generator as g; g(\\'{mod}\\').call(
 ' | sbatch --error="{out}/%j.out" --output="{out}/%j.out" """
 
 
-def create_SLURM_command(generator, size, params, SLURM_out):
+def create_SLURM_command(dataset, size, params, SLURM_out):
     """Create the SLURM command that will generate the requested number of samples.
 
     Args:
-        generator (callable): dataset generating function. A function from `datasets.py` in the
-                              current directory.
+        dataset (class): A dataset from datasets.py in the current directory.
         size (int): number of samples to generate.
         params (dict): parameter dict to pass to generating function. Must be reconstructable from
                        ast.literal_eval.
@@ -72,42 +71,39 @@ def create_SLURM_command(generator, size, params, SLURM_out):
     Returns:
         (str): viable bash command to submit SLURM job.
     """
-    generator = utils.get_generator()
-
     # create command string
     command = (
         raw_SLURM.format(
-            bash_commands="\n".join(generator.bash_commands),
+            bash_commands="\n".join(dataset.bash_commands),
             cwd=os.getcwd(),
             this=os.path.basename(os.path.dirname(os.path.abspath(__file__))),  # "slurm_gen"
-            mod=utils.sanitize_str(generator.__name__),
+            mod=utils.sanitize_str(dataset.__name__),
             size=utils.sanitize_str(size),
             params=utils.sanitize_str(repr(params)),
             out=utils.sanitize_str(SLURM_out),
         )
-        + generator.slurm_options
+        + dataset.slurm_options
     )
 
     return command
 
 
-def _get_sample_time(generator, params, verbose):
+def _get_sample_time(dataset, params, verbose):
     """Determine the time required to generate a single sample, adjusted two standard deviations
     above the mean.
 
     Args:
-        generator (class): dataset generating function. A dataset from `datasets.py` in the current
-                           directory.
+        dataset (class): A dataset from datasets.py.
         params (utils.DefaultParamObject): parameter object to pass to generating function.
         verbose (bool): whether to print debug statements.
     Returns:
         (float): number of seconds required to generate a single sample, + two standard deviations.
     """
     try:
-        per_save = Cache(os.getcwd(), verbose)[generator][params._to_string()].time_per_save
+        per_save = Cache(os.getcwd(), verbose)[dataset][params._to_string()].time_per_save
     except FileNotFoundError:
         try:
-            per_save = Cache(os.getcwd(), verbose)[generator][0].time_per_save
+            per_save = Cache(os.getcwd(), verbose)[dataset][0].time_per_save
             print("No time data is stored for this parameter set.")
             yes = input("Would you like to use time data from another parameter set? (Y/n): ")
             if yes.lower() in {"n", "no"}:
@@ -116,32 +112,31 @@ def _get_sample_time(generator, params, verbose):
             raise ValueError("no time data for this dataset; --time must be provided")
     utils.v_print(verbose, "two standard deviations above the mean is {}s".format(per_save))
 
-    per_sample = per_save / generator.cache_every
+    per_sample = per_save / dataset.cache_every
     utils.v_print(verbose, "\tper sample: {}s".format(per_sample))
 
     return per_sample
 
 
-def _generate_with_SLURM(generator, size, params, njobs=1, job_time=None, verbose=False):
+def _generate_with_SLURM(dataset, size, params, njobs=1, job_time=None, verbose=False):
     """Using SLURM, generate `size` samples of the dataset.
 
     Args:
-        generator (class): dataset generating function. A dataset from `datasets.py` in the current
-                           directory.
+        dataset (class): A dataset from datasets.py.
         size (int): number of samples to generate.
         params (utils.DefaultParamObject): parameter object to pass to generating function.
         njobs (int): number of SLURM jobs to use to generate the data.
         job_time (str): time for each batch job, or None if adapted from metrics.
         verbose (bool): whether to print debug statements.
     """
-    _remove_metadata(generator.__name__, params, verbose)
+    _remove_metadata(dataset, params, verbose)
 
     SLURM_out = utils.get_SLURM_output_dir()
     os.makedirs(SLURM_out, exist_ok=True)
 
     per_sample = None
     if job_time is None:
-        per_sample = _get_sample_time(generator, params, verbose)
+        per_sample = _get_sample_time(dataset, params, verbose)
 
     for nsamples in utils.samples_to_jobs(size, njobs):
         # nsamples is the number of samples each job should generate
@@ -151,19 +146,11 @@ def _generate_with_SLURM(generator, size, params, njobs=1, job_time=None, verbos
             # round up to the next minute
             job_time = int(per_sample * nsamples / 60) + 1
 
-        command = create_SLURM_command(generator, nsamples, params, SLURM_out)
+        command = create_SLURM_command(dataset, nsamples, params, SLURM_out)
         utils.v_print(verbose, "Submitting the following job:")
         utils.v_print(verbose, command)
 
-        process = subprocess.run(
-            command,
-            cwd=os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__))
-            ),  # be able to import the package
-            shell=True,
-            universal_newlines=True,
-            check=True,
-        )
+        process = subprocess.run(command, shell=True, universal_newlines=True, check=True)
 
         if process.stdout is not None or process.stderr is not None:
             print("Stdout:", process.stdout, sep="\n")
@@ -185,13 +172,13 @@ def generate(dataset, n, params, njobs=1, job_time=None, this_node=False, verbos
                           This ignores all SLURM options.
         verbose (bool): print debug-level information from all functions.
     """
-    generator = utils.get_generator(dataset)
-    params = generator.param_class(**params)
+    dataset = utils.get_dataset(dataset)
+    params = dataset.param_class(**params)
     if this_node:
-        _generate_here(generator, n, params, verbose)
+        _generate_here(dataset, n, params, verbose)
     else:
         try:
-            _generate_with_SLURM(generator, n, params, njobs, job_time, verbose)
+            _generate_with_SLURM(dataset, n, params, njobs, job_time, verbose)
         except ValueError as e:
             if str(e) == "no time data is stored for this dataset; --time must be provided":
                 print("Error: " + str(e))
