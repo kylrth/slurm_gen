@@ -59,6 +59,52 @@ class InsufficientSamplesError(Exception):
         return "{}:{}:{}".format(str(h).zfill(2), str(m).zfill(2), str(s).zfill(2))
 
 
+def count_samples(path, verbose=False):
+    """Count the number of samples in all the pickle files in the path.
+
+    Pickle files end with ".pkl".
+
+    Args:
+        path (str): directory containing pickle files.
+        verbose (bool): whether to print debug statements.
+    Returns:
+        (int): the number of samples in the path.
+    """
+    count = 0
+    for name in os.listdir(path):
+        full_name = os.path.join(path, name)
+        if name.endswith(".pkl") and os.path.isfile(full_name):
+            count += len(utils.from_pickle(full_name, verbose)[1])
+    return count
+
+
+def get_samples(path, size, verbose=False):
+    """Get `size` samples from pickle files in the path.
+
+    Pickle files end with ".pkl".
+
+    Args:
+        path (str): directory containing pickle files.
+        size (int): number of samples to retrieve.
+        verbose (bool): whether to print debug statements.
+    Returns:
+        tuple(list, list): samples from path.
+    Throws:
+        FileNotFoundError: not enough samples were found in the directory.
+    """
+    X, y = [], []
+    for name in os.listdir(path):
+        full_name = os.path.join(path, name)
+        if name.endswith(".pkl") and os.path.isfile(full_name):
+            temp_X, temp_y = utils.from_pickle(full_name, verbose)
+            X.extend(temp_X)
+            y.extend(temp_y)
+            if len(X) >= size:
+                return X[:size], y[:size]
+
+    raise FileNotFoundError("not enough samples found in path '{}'".format(path))
+
+
 class PreprocessedData:
     """Represents a single list of data samples, preprocessed by a specific preprocessor."""
 
@@ -102,7 +148,7 @@ class PreprocessedData:
 
         # count the number by hand
         try:
-            self._size = utils.count_samples(self.path, self.verbose)
+            self._size = count_samples(self.path, self.verbose)
         except FileNotFoundError:
             os.makedirs(self.path, exist_ok=True)
             self._size = 0
@@ -126,7 +172,7 @@ class PreprocessedData:
         """
         if size is None:
             # get all the samples
-            return utils.get_samples(self.path, self.size, self.verbose)
+            return get_samples(self.path, self.size, self.verbose)
 
         max_size = self.size
         if max_size < size:
@@ -134,7 +180,7 @@ class PreprocessedData:
                 size - max_size, os.path.dirname(os.path.dirname(self.path)), self.verbose
             )
 
-        return utils.get_samples(self.path, size, self.verbose)
+        return get_samples(self.path, size, self.verbose)
 
 
 class Group:
@@ -182,7 +228,7 @@ class Group:
                         return self._unprocessed_size
 
         # count the number by hand
-        self._unprocessed_size = utils.count_samples(self.path, self.verbose)
+        self._unprocessed_size = count_samples(self.path, self.verbose)
 
         # store it in the metadata file
         utils.v_print(
@@ -205,13 +251,13 @@ class Group:
         """
         if size is None:
             # return all the samples
-            return utils.get_samples(self.path, self.unprocessed_size, self.verbose)
+            return get_samples(self.path, self.unprocessed_size, self.verbose)
 
         u_size = self.unprocessed_size
         if u_size < size:
             raise InsufficientSamplesError(size - u_size, os.path.dirname(self.path), self.verbose)
 
-        return utils.get_samples(self.path, size, self.verbose)
+        return get_samples(self.path, size, self.verbose)
 
     def assert_preprocessed_size(self, preprocessor, size):
         """Ensure that at least `size` samples have been processed with `func`.
@@ -344,7 +390,7 @@ class ParamSet:
                         return raw_size
 
         # count the number by hand
-        raw_size = utils.count_samples(os.path.join(self.path, "raw"), self.verbose)
+        raw_size = count_samples(os.path.join(self.path, "raw"), self.verbose)
 
         # store it in the metadata file
         utils.v_print(self.verbose, "writing size '{}' to '{}'".format(raw_size, raw_metadata_path))

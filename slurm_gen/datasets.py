@@ -10,7 +10,7 @@ Kyle Roth. 2019-05-17.
 from functools import wraps
 import os
 import pickle
-from time import time
+import time
 
 from slurm_gen import utils
 
@@ -20,6 +20,21 @@ class objectless:
 
     def __new__(cls, *args, **kwargs):
         raise RuntimeError("{} should not be instantiated".format(cls))
+
+
+def get_unique_filename():
+    """Get a string guaranteed not to be repeated on the same computer (unless the clock
+    changes).
+
+    If inside a SLURM job, return the SLURM job ID. Otherwise, return digits from
+    time.time().
+
+    Returns:
+        (str): unique string.
+    """
+    if "SLURM_JOBID" in os.environ:
+        return os.environ["SLURM_JOBID"]
+    return str(time.time()).replace(".", "")
 
 
 def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
@@ -76,8 +91,10 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
                 params = cls.param_class(**params)
 
                 # cache it in the raw location
-                dataset_dir = utils.get_dataset_dir(os.getcwd(), f.__name__, params)
-                unique_name = utils.get_unique_filename()
+                dataset_dir = os.path.join(
+                    os.getcwd(), ".slurm_cache", f.__name__, params._to_string()
+                )
+                unique_name = get_unique_filename()
                 raw_path = os.path.join(dataset_dir, "raw", unique_name + "_{}.pkl")
                 print("Output path:", raw_path)
                 os.makedirs(os.path.dirname(raw_path), exist_ok=True)
@@ -98,7 +115,7 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
                 # process does not finish
                 with open(time_file, "a+", buffering=1) as time_f:
                     while True:
-                        start = time()
+                        start = time.time()
 
                         # try to get the next pair
                         try:
@@ -110,7 +127,7 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
                                     raw_path.format(data_count // cache_every + 1), "wb"
                                 ) as pkl:
                                     pickle.dump((to_store_x, to_store_y), pkl)
-                                time_f.write(str((time() - start) / cache_every) + "\n")
+                                time_f.write(str((time.time() - start) / cache_every) + "\n")
                             break
 
                         # add it to the temporary list
@@ -127,7 +144,7 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
                             to_store_y.clear()
 
                             # record the average time spent
-                            time_f.write(str((time() - start) / cls.cache_every) + "\n")
+                            time_f.write(str((time.time() - start) / cls.cache_every) + "\n")
 
             @classmethod
             def preprocessor(cls, func):

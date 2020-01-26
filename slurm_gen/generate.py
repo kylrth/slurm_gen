@@ -49,6 +49,17 @@ def _generate_here(dataset, size, params, verbose=False):
     dataset.call(size, params.__dict__)
 
 
+def sanitize_str(s):
+    """Sanitize strings to send to a shell.
+
+    Args:
+        s (str): string (or something to be converted to a string).
+    Returns:
+        (str): sanitized string.
+    """
+    return str(s).replace('"', '\\"').replace("'", "\\'")
+
+
 # the base string for submitting a data generation job to SLURM
 raw_SLURM = """echo '#!/bin/bash
 
@@ -77,10 +88,10 @@ def create_SLURM_command(dataset, size, params, SLURM_out):
             bash_commands="\n".join(dataset.bash_commands),
             cwd=os.getcwd(),
             this=os.path.basename(os.path.dirname(os.path.abspath(__file__))),  # "slurm_gen"
-            mod=utils.sanitize_str(dataset.__name__),
-            size=utils.sanitize_str(size),
-            params=utils.sanitize_str(repr(params)),
-            out=utils.sanitize_str(SLURM_out),
+            mod=sanitize_str(dataset.__name__),
+            size=sanitize_str(size),
+            params=sanitize_str(repr(params)),
+            out=sanitize_str(SLURM_out),
         )
         + dataset.slurm_options
     )
@@ -118,6 +129,31 @@ def _get_sample_time(dataset, params, verbose):
     return per_sample
 
 
+def samples_to_jobs(size, njobs):
+    """Return a list of sample sizes for each job, by assigning as evenly as possible.
+
+    Args:
+        size (int): number of samples requested.
+        njobs (int): number of jobs to create.
+    Returns:
+        (list): list of length `njobs`, containing the number of samples for each job to
+                generate.
+    """
+    even = size // njobs
+    out = [even] * njobs
+    for i in range(size - even * njobs):  # add remainder evenly at the front
+        out[i] += 1
+    return out
+
+
+def test_samples_to_jobs():
+    """Run simple test cases against samples_to_jobs."""
+    assert samples_to_jobs(100, 1) == [100]
+    assert samples_to_jobs(100, 2) == [50, 50]
+    assert samples_to_jobs(100, 3) == [34, 33, 33]
+    assert samples_to_jobs(101, 3) == [34, 34, 33]
+
+
 def _generate_with_SLURM(dataset, size, params, njobs=1, job_time=None, verbose=False):
     """Using SLURM, generate `size` samples of the dataset.
 
@@ -131,14 +167,14 @@ def _generate_with_SLURM(dataset, size, params, njobs=1, job_time=None, verbose=
     """
     _remove_metadata(dataset, params, verbose)
 
-    SLURM_out = utils.get_SLURM_output_dir()
+    SLURM_out = os.path.join(os.getcwd(), ".slurm_gen_cache", ".slurm_output")
     os.makedirs(SLURM_out, exist_ok=True)
 
     per_sample = None
     if job_time is None:
         per_sample = _get_sample_time(dataset, params, verbose)
 
-    for nsamples in utils.samples_to_jobs(size, njobs):
+    for nsamples in samples_to_jobs(size, njobs):
         # nsamples is the number of samples each job should generate
 
         if per_sample is not None:
