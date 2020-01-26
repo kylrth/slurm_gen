@@ -177,6 +177,5 @@ X, y = Cache("./example/")["noisy_sine"][0]["train"].get(700)
 ## TODO
 
 - Define the object hierarchy in the readme.
-- Get rid of utils.py?
 - Be more efficient with keeping track of the sizes of the datasets.
 - Be able to preprocess on a SLURM job.
