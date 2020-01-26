@@ -28,7 +28,8 @@ Start by using the `DefaultParamObject` class and the `@dataset` decorator to de
 
 ```python
 # example/datasets.py
-import numpy as np
+import math
+import random
 
 from slurm_gen import DefaultParamObject, dataset
 
@@ -62,8 +63,9 @@ def noisy_sine(size, params):
         (float): x-value.
         (float): y-value plus noise.
     """
-    for x in np.random.uniform(params.left, params.right, size=size):
-        yield x, np.sin(x) + np.random.normal(scale=params.std_dev)
+    for _ in range(size):
+        x = random.uniform(params.left, params.right)
+        yield x, math.sin(x) + random.normalvariate(mu=0, sigma=params.std_dev)
 ```
 
 The `NoisySineParams` defines the possible configuration parameters that the generator can accept, as well as the default values for those parameters. When generating or accessing samples, we can specify non-default values for any of these parameters.

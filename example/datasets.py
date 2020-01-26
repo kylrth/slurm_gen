@@ -1,4 +1,5 @@
-import numpy as np
+import math
+import random
 
 from slurm_gen import DefaultParamObject, dataset
 
@@ -32,8 +33,9 @@ def noisy_sine(size, params):
         (float): x-value.
         (float): y-value plus noise.
     """
-    for x in np.random.uniform(params.left, params.right, size=size):
-        yield x, np.sin(x) + np.random.normal(scale=params.std_dev)
+    for _ in range(size):
+        x = random.uniform(params.left, params.right)
+        yield x, math.sin(x) + random.normalvariate(mu=0, sigma=params.std_dev)
 
 
 @noisy_sine.preprocessor

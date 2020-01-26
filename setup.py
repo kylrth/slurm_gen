@@ -33,7 +33,6 @@ setup(
     ],
     keywords="SLURM machine-learning data",
     py_modules=["generate", "data_loading", "datasets", "utils"],
-    install_requires=["numpy", "matplotlib", "scipy"],
     # we need to be able to write the cache to the location where the module lives
     zip_safe=False,
 )
