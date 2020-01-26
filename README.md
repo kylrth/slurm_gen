@@ -174,8 +174,43 @@ from slurm_gen import Cache
 X, y = Cache("./example/")["noisy_sine"][0]["train"].get(700)
 ```
 
+### Object hierarchy
+
+You saw in the example above that we accessed the data by indexing into the `Cache` object. Here we describe the object hierarchy used by SLURM_gen within the Python environment.
+
+```txt
+Cache
+ '- Dataset
+     '- ParamSet
+         '- Group
+             :- raw data, accessed with `.get()`
+             '- PreprocessedData
+                 '- preprocessed samples, accessed with `.get()`
+```
+
+**Datasets** can be indexed from a `Cache` object in the following ways:
+
+- by name, with a string (e.g. "noisy_sine")
+- by number, in order of declaration (e.g. 0)
+- by the actual dataset imported from `datasets.py` (e.g. `from datasets import noisy_sine; Cache()[noisy_sine]`)
+
+**ParamSets** can be indexed from a `Dataset` object in the following ways:
+
+- by number, as printed with `python -m slurm_gen.list`
+- by the string used as the directory name for the parameter set (e.g. "left#-1|right#1|std_dev#0.1")
+- by the dict of parameter values (e.g. {"left": -1, "right": -1, "std_dev": 0.1})
+- by a `DefaultParamObject` (e.g. `NoisySineParams(left=-1, right=-1, std_dev=0.1)`)
+
+**Groups** can be indexed from a `ParamSet` object only by the string used as the name for the group (e.g. "train"). The `Group` object has a `.get()` method that unprocessed samples associated with the group. By default it returns all of them, but you can specify how many you want as a parameter.
+
+**`PreprocessedData`** objects can be indexed from a `Group` object in the following ways:
+
+- by preprocessor name (e.g. "square_both")
+- by the actual preprocessor imported from `datasets.py` (e.g. `from datasets import square_both; group[square_both]`)
+
+The `PreprocessedData` object has a `.get()` method implementing the same functionality as that of `Group`.
+
 ## TODO
 
-- Define the object hierarchy in the readme.
 - Be more efficient with keeping track of the sizes of the datasets.
 - Be able to preprocess on a SLURM job.
