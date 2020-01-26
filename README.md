@@ -68,7 +68,7 @@ def noisy_sine(size, params):
 
 The `NoisySineParams` defines the possible configuration parameters that the generator can accept, as well as the default values for those parameters. When generating or accessing samples, we can specify non-default values for any of these parameters.
 
-The `@dataset` decorator converts `noisy_sine` into a dataset which can be used by `slurm_gen.generate` to create cache files containing arbitrary numbers of samples. We can define as many functions as we like in `datasets.py`, and all those marked with `@dataset` will be usable in SLURM_gen.
+The `@dataset` decorator converts `noisy_sine` into a dataset which can be used by the `slurm_gen.generate` module to create cache files containing arbitrary numbers of samples. We can define as many functions as we like in `datasets.py`, and all those marked with `@dataset` will be usable in SLURM_gen.
 
 #### Generate samples
 
@@ -112,7 +112,7 @@ cd example/
 python -m slurm_gen.move noisy_sine 700 train -p 0
 ```
 
-The `-p` argument identifies which parameter set to use. You can also use a dictionary string as the identifier.
+The `-p` argument identifies which parameter set to use. You can also use a dictionary of values as the identifier, by passing a string that will be evaluated as a dictionary.
 
 After the move, the output of `python -m slurm_gen.list` will be
 
@@ -126,7 +126,7 @@ Param set #1:
        std_dev#0.5|
 ```
 
-Once you've moved samples into a labeled group, you can't move them back.
+Once you've moved samples into a labeled group, you can't move them back. This is to avoid accidentally mixing samples between groups, possibly inflating the accuracy of machine learning models.
 
 #### Preprocessing samples
 
@@ -151,7 +151,14 @@ python -m slurm_gen.preprocess noisy_sine square_both train 600 -p 0
 After the data is preprocessed, the output of `python -m slurm_gen.list` will be
 
 ```txt
-TODO
+noisy_sine:
+Param set #0:
+    left#-1|right#1| raw: 300
+                   | train: unprocessed(700)
+                   |      : square_both(600)
+Param set #1:
+    left#0|right#1| raw: 1000
+       std_dev#0.5|
 ```
 
 #### Accessing the samples
@@ -161,8 +168,8 @@ To access the samples within Python, use the `get_dataset` function:
 ```python
 from slurm_gen import Cache
 
-# load those 1000 samples as a training set
-X, y = Cache("./example/")["noisy_sine"][0]["train"].get(1000)
+# load those 700 samples as a training set
+X, y = Cache("./example/")["noisy_sine"][0]["train"].get(700)
 ```
 
 ## TODO

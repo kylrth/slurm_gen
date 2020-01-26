@@ -30,7 +30,7 @@ def _preprocess(dataset, preprocessor, target, param_set, size, yes, verbose):
         print("This param set only has {} samples. Aborting".format(param_set.raw_size))
         return
 
-    print("Dataset:", dataset)
+    print("Dataset:", dataset.__name__)
     print("Params:", param_set.name)
     print("Group:", target)
 
@@ -60,12 +60,14 @@ def _preprocess(dataset, preprocessor, target, param_set, size, yes, verbose):
     except IndexError:
         current_size = 0
     if yes:
-        print("Preprocessing {} samples with '{}'".format(size - current_size, preprocessor))
+        print(
+            "Preprocessing {} samples with '{}'".format(size - current_size, preprocessor.__name__)
+        )
         print("for a total of {} samples preprocessed this way.".format(size))
     else:
         print(
             "Would you like to preprocess {} samples with '{}'?".format(
-                size - current_size, preprocessor
+                size - current_size, preprocessor.__name__
             )
         )
         print(

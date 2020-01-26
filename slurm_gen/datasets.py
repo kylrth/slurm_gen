@@ -130,11 +130,6 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
                             time_f.write(str((time() - start) / cls.cache_every) + "\n")
 
             @classmethod
-            def __repr__(cls):
-                """When formatted to a string, just give the name."""
-                return cls.__name__
-
-            @classmethod
             def preprocessor(cls, func):
                 """Wrap a preprocessing function so it's available for this particular dataset.
 
@@ -169,11 +164,6 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
                             y: modified(?) targets.
                         """
                         return func(X, y)
-
-                    @classmethod
-                    def __repr__(cls):
-                        """When formatted to a string, just give the name."""
-                        return cls.__name__
 
                 Inner.__name__ = func.__name__
                 Inner.__doc__ = func.__doc__

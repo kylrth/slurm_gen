@@ -29,7 +29,7 @@ class InsufficientSamplesError(Exception):
         self.needed = size
         try:
             dataset = os.path.basename(os.path.dirname(os.path.normpath(dataset_path)))
-            cache_every = getattr(datasets, dataset).cache_every
+            cache_every = utils.get_dataset(dataset).cache_every
             time_per_sample = ParamSet(dataset_path, verbose).time_per_save / cache_every
             est_time = self.s_to_clock(size * time_per_sample)
             super(InsufficientSamplesError, self).__init__(
@@ -213,14 +213,14 @@ class Group:
 
         return utils.get_samples(self.path, size, self.verbose)
 
-    def assert_preprocessed_size(self, name, size):
+    def assert_preprocessed_size(self, preprocessor, size):
         """Ensure that at least `size` samples have been processed with `func`.
 
         The preprocessor must accept a list of data points and a list of corresponding labels. It
         should return preprocessed versions of both data and label.
 
         Args:
-            func (str): name of preprocessor to be applied to data.
+            preprocessor (class): a preprocessor for the dataset, defined in datasets.py.
             size (int): number of samples to preprocess.
         Raises:
             (utils.InsufficientSamplesError): there are not enough unprocessed samples.
@@ -232,7 +232,7 @@ class Group:
         unproc_files = sorted(file for file in os.listdir(self.path) if file.endswith(".pkl"))
 
         # make sure the PreprocessedData exists, by trying to get it
-        proc_set = self[name]
+        proc_set = self[preprocessor]
 
         # get the current size of the PreprocessedData and the individual files which
         # have already been preprocessed
@@ -295,8 +295,10 @@ class Group:
             raise IndexError("preprocessor '{}' not found for this dataset".format(idx))
 
         if utils.is_preprocessor(idx):
-            if idx in self.preprocessors:
-                return self._make_preprocessed_data(idx.__name__, idx)
+            for preproc in self.preprocessors:
+                if preproc.__name__ == idx.__name__:
+                    return self._make_preprocessed_data(idx.__name__, idx)
+            raise IndexError("preprocessor '{}' does not apply to this dataset".format(idx))
 
         raise IndexError(
             "Preprocessed set access permitted by str or preprocessor; got {}".format(type(idx))

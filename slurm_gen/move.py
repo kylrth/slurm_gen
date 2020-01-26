@@ -37,7 +37,7 @@ def _move(dataset, param_num, size, target, yes, verbose):
 
     if not yes:
         # ask confirmation
-        print("Dataset:", dataset)
+        print("Dataset:", dataset.__name__)
         print("Params:", param_set.name)
         print("Move {} raw samples to {}?".format(size, target))
         target_size = param_set[target].unprocessed_size if target in param_set else 0
