@@ -78,11 +78,11 @@ Now that we've defined the generator, we can generate some samples for that data
 
 ```bash
 cd example/  # the directory containing datasets.py
-python -m slurm_gen.generate noisy_sine -n 1000 --njobs 40 --time "30"
-python -m slurm_gen.generate noisy_sine -n 1000 --njobs 40 --params "{'left': 0, 'std_dev': 0.5}"
+python -m slurm_gen.generate noisy_sine -n 1000 --njobs 3 --time "10"
+python -m slurm_gen.generate noisy_sine -n 1000 --njobs 3 --params "{'left': 0, 'std_dev': 0.5}"
 ```
 
-In the first example above, we submitted 40 SLURM jobs, splitting the 1000 samples evenly among them. Since we had no samples for this dataset yet, we had to provide `--time`. In the second example, we omitted the `--time` argument, and a time duration three standard deviations above the mean of previous runs was used, adapted to the number of samples per job. In the second example we also set some configuration parameters to non-default values.
+In the first example above, we submitted 3 SLURM jobs, splitting the 1000 samples evenly among them. Since we had no samples for this dataset yet, we had to provide `--time`. In the second example, we omitted the `--time` argument, and a time duration three standard deviations above the mean of previous runs was used, adapted to the number of samples per job. In the second example we also set some configuration parameters to non-default values.
 
 #### Managing samples
 
