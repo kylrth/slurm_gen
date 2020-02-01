@@ -41,12 +41,12 @@ def _generate_here(dataset, size, params, verbose=False):
     Args:
         dataset (class): dataset defined in datasets.py.
         size (int): number of samples to generate.
-        params (dict): parameter dict to pass to generating function.
+        params (DefaultParamObject): parameter object to pass to generating function.
     """
     _remove_metadata(dataset, params, verbose)
 
     # generate the data
-    dataset.call(size, params.__dict__)
+    dataset.call(size, params._to_string())
 
 
 def sanitize_str(s):
@@ -66,11 +66,11 @@ raw_SLURM = """echo '#!/bin/bash
 {bash_commands}
 
 cd "{cwd}"
-python3 -u -c "from {this}.utils import get_generator as g; g(\\'{mod}\\').call({size}, \\'{params}\\')"
-' | sbatch --error="{out}/%j.out" --output="{out}/%j.out" """
+python3 -u -c "from {this}.utils import get_dataset as g; g(\\"{mod}\\").call({size}, \\"{params}\\")"
+' | sbatch --error="{out}/%j.out" --output="{out}/%j.out" --time="{time}" """
 
 
-def create_SLURM_command(dataset, size, params, SLURM_out):
+def create_SLURM_command(dataset, size, params, SLURM_out, job_time):
     """Create the SLURM command that will generate the requested number of samples.
 
     Args:
@@ -79,6 +79,10 @@ def create_SLURM_command(dataset, size, params, SLURM_out):
         params (dict): parameter dict to pass to generating function. Must be reconstructable from
                        ast.literal_eval.
         SLURM_out (str): path to SLURM output directory.
+        job_time (str): time for each job to run. Acceptable time formats include "MM", "MM:SS",
+                        "HH:MM:SS", "D-HH", "D-HH:MM" and "D-HH:MM:SS". If None, the second
+                        standard deviation above the mean of previous runs is used (adapted to the
+                        number of samples per job).
     Returns:
         (str): viable bash command to submit SLURM job.
     """
@@ -90,8 +94,9 @@ def create_SLURM_command(dataset, size, params, SLURM_out):
             this=os.path.basename(os.path.dirname(os.path.abspath(__file__))),  # "slurm_gen"
             mod=sanitize_str(dataset.__name__),
             size=sanitize_str(size),
-            params=sanitize_str(repr(params)),
+            params=sanitize_str(params._to_string()),
             out=sanitize_str(SLURM_out),
+            time=sanitize_str(job_time),
         )
         + dataset.slurm_options
     )
@@ -167,7 +172,7 @@ def _generate_with_SLURM(dataset, size, params, njobs=1, job_time=None, verbose=
     """
     _remove_metadata(dataset, params, verbose)
 
-    SLURM_out = os.path.join(os.getcwd(), ".slurm_gen_cache", ".slurm_output")
+    SLURM_out = os.path.join(os.getcwd(), ".slurm_cache", ".slurm_output")
     os.makedirs(SLURM_out, exist_ok=True)
 
     per_sample = None
@@ -182,15 +187,18 @@ def _generate_with_SLURM(dataset, size, params, njobs=1, job_time=None, verbose=
             # round up to the next minute
             job_time = int(per_sample * nsamples / 60) + 1
 
-        command = create_SLURM_command(dataset, nsamples, params, SLURM_out)
+        command = create_SLURM_command(dataset, nsamples, params, SLURM_out, job_time)
         utils.v_print(verbose, "Submitting the following job:")
         utils.v_print(verbose, command)
 
-        process = subprocess.run(command, shell=True, universal_newlines=True, check=True)
+        try:
+            process = subprocess.run(command, shell=True, universal_newlines=True, check=True)
 
-        if process.stdout is not None or process.stderr is not None:
-            print("Stdout:", process.stdout, sep="\n")
-            print("Stderr:", process.stderr, sep="\n")
+            if process.stdout is not None or process.stderr is not None:
+                print("Stdout:", process.stdout, sep="\n")
+                print("Stderr:", process.stderr, sep="\n")
+        except subprocess.CalledProcessError:
+            raise RuntimeError("error encountered while submitting SLURM job")
 
 
 def generate(dataset, n, params, njobs=1, job_time=None, this_node=False, verbose=False):
@@ -236,12 +244,6 @@ if __name__ == "__main__":
         type=int,
         required="--this-node" not in sys.argv,  # only require if submitting to SLURM
         help="number of SLURM jobs to submit. Each job will produce about n/njobs samples",
-    )
-    parser.add_argument(
-        "--mem-per-cpu",
-        type=str,
-        required="--this-node" not in sys.argv,  # only require if submitting to SLURM
-        help="memory to assign to each CPU in a SLURM job, e.g. '2GB'",
     )
 
     # optional arguments

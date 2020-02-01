@@ -76,7 +76,7 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
             slurm_options = '--mem-per-cpu="{mem}" '.format(mem=mem) + slurm_opts
 
             # store the bash commands
-            bash_commands = bash_cmds
+            bash_commands = bash_cmds if bash_cmds is not None else []
 
             @classmethod
             def call(cls, size, params):
@@ -85,10 +85,10 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
 
                 Args:
                     size (int): number of samples to create.
-                    params (dict): parameters to pass to generating function.
+                    params (str): parameters to pass to generating function.
                 """
                 # convert to the parameter class
-                params = cls.param_class(**params)
+                params = cls.param_class._from_string(params)
 
                 # cache it in the raw location
                 dataset_dir = os.path.join(
@@ -124,10 +124,10 @@ def dataset(ParamClass, mem, cache_freq, slurm_opts="", bash_cmds=None):
                             # store everything left over
                             if to_store_x:
                                 with open(
-                                    raw_path.format(data_count // cache_every + 1), "wb"
+                                    raw_path.format(data_count // cls.cache_every + 1), "wb"
                                 ) as pkl:
                                     pickle.dump((to_store_x, to_store_y), pkl)
-                                time_f.write(str((time.time() - start) / cache_every) + "\n")
+                                time_f.write(str((time.time() - start) / cls.cache_every) + "\n")
                             break
 
                         # add it to the temporary list
