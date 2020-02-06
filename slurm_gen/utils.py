@@ -8,7 +8,13 @@ import importlib.util
 import inspect
 import os
 import pickle
+import platform
+import sys
 import time
+import traceback
+import urllib
+
+import pkg_resources
 
 
 def v_print(verbose, s):
@@ -279,3 +285,77 @@ def paramSetIdentifier(arg):
     # ParamObject string
     dataset = utils.get_dataset(sys.argv[1])
     return dataset.paramClass._from_string(arg)
+
+
+_github_issue_body = """PLEASE: Fill in a descriptive title and then delete this sentence.
+PLEASE: Then add any helpful commentary before submitting.
+
+Issue type: Exception
+
+Command run:
+```
+{cmd}
+```
+
+Error:
+```
+Traceback (most recent call last):
+{tb}
+{err_msg}
+```
+
+SLURM-gen version: `{version}`
+OS: `{os}`
+"""
+
+
+def createGitHubLink(args, tb, err_msg):
+    """Return a link to create a new issue on SLURM-gen's issue tracker on GitHub, based on the
+    error encountered.
+
+    Args:
+        args (list(string)): list of command-line arguments run to produce the exception.
+        tb (string): traceback extracted from the error.
+        err_msg (string): error message, including error type
+                          (e.g. "ZeroDivisionError: division by zero").
+    Returns:
+        (string): link.
+    """
+    body = _github_issue_body.format(
+        cmd=" ".join("'{}'".format(arg) for arg in args),
+        version=pkg_resources.require("SLURM_gen")[0].version,
+        os=platform.system(),
+        tb=tb,
+        err_msg=err_msg,
+    )
+
+    fields = {"body": body, "labels": ",".join(["bug"])}
+    return "https://github.com/kylrth/slurm_gen/issues/new?" + urllib.parse.urlencode(fields)
+
+
+def gitHubIssueHandler(func, *args, **kwargs):
+    """Call the function with the provided args and kwargs, but wrap exceptions with a link to open
+    a related GitHub issue for the project.
+
+    Args:
+        func (callable): function to call on args and kwargs.
+        args
+        kwargs
+    Returns:
+        anything the function call returns.
+    """
+    try:
+        func(*args, **kwargs)
+    except KeyboardInterrupt:
+        print("\nexiting")
+    except Exception as e:
+        tb = "".join(traceback.format_tb(e.__traceback__)).rstrip()
+        err_msg = repr(e)
+        args = sys.argv
+        args[0] = "slurm_gen" + os.path.sep + args[0].split("slurm_gen" + os.path.sep)[-1]
+
+        print("Traceback (most recent call last):")
+        print(tb)
+        print(err_msg)
+        print("\nTo submit an issue to GitHub, open the following link:\n")
+        print(createGitHubLink(sys.argv, tb, err_msg))

@@ -119,15 +119,13 @@ if __name__ == "__main__":
     args.dataset = utils.get_dataset(args.dataset)
     args.preprocessor = utils.get_preprocessor(args.preprocessor, args.dataset)
 
-    try:
-        _preprocess(
-            args.dataset,
-            args.preprocessor,
-            args.target,
-            args.param_set,
-            args.n_samples,
-            args.yes,
-            args.verbose,
-        )
-    except KeyboardInterrupt:
-        print("\nexiting")
+    utils.gitHubIssueHandler(
+        _preprocess,
+        args.dataset,
+        args.preprocessor,
+        args.target,
+        args.param_set,
+        args.n_samples,
+        args.yes,
+        args.verbose,
+    )

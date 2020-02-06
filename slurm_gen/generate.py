@@ -278,4 +278,13 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    generate(args.dataset, args.n, args.params, args.njobs, args.time, args.this_node, args.verbose)
+    utils.gitHubIssueHandler(
+        generate,
+        args.dataset,
+        args.n,
+        args.params,
+        args.njobs,
+        args.time,
+        args.this_node,
+        args.verbose,
+    )

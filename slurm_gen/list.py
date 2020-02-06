@@ -11,6 +11,7 @@ import os
 import sys
 
 from slurm_gen.data_objects import Cache
+from slurm_gen.utils import gitHubIssueHandler
 
 
 def print_sizes(param_set):
@@ -122,7 +123,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    try:
-        _list(args.dataset, args.verbose)
-    except KeyboardInterrupt:
-        print("\nexiting")
+    gitHubIssueHandler(_list, args.dataset, args.verbose)

@@ -77,7 +77,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    try:
-        _move(args.dataset, args.param_set, args.n_samples, args.target, args.yes, args.verbose)
-    except KeyboardInterrupt:
-        print("\nexiting")
+    utils.gitHubIssueHandler(
+        _move, args.dataset, args.param_set, args.n_samples, args.target, args.yes, args.verbose
+    )
