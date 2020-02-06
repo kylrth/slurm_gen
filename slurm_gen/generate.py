@@ -201,6 +201,14 @@ def _generate_with_SLURM(dataset, size, params, njobs=1, job_time=None, verbose=
             raise RuntimeError("error encountered while submitting SLURM job")
 
 
+# These are exceptions that should cause an error report to the user instead of a full exception
+# message.
+known_exceptions = [
+    "no time data is stored for this dataset; --time must be provided",
+    "no dataset file found",
+]
+
+
 def generate(dataset, n, params, njobs=1, job_time=None, this_node=False, verbose=False):
     """Submit the SLURM jobs to create the samples requested from the command line.
 
@@ -216,18 +224,18 @@ def generate(dataset, n, params, njobs=1, job_time=None, this_node=False, verbos
                           This ignores all SLURM options.
         verbose (bool): print debug-level information from all functions.
     """
-    dataset = utils.get_dataset(dataset)
-    params = dataset.param_class(**params)
-    if this_node:
-        _generate_here(dataset, n, params, verbose)
-    else:
-        try:
+    try:
+        dataset = utils.get_dataset(dataset)
+        params = dataset.param_class(**params)
+        if this_node:
+            _generate_here(dataset, n, params, verbose)
+        else:
             _generate_with_SLURM(dataset, n, params, njobs, job_time, verbose)
-        except ValueError as e:
-            if str(e) == "no time data is stored for this dataset; --time must be provided":
-                print("Error: " + str(e))
-            else:
-                raise e
+    except ValueError as e:
+        if str(e) in known_exceptions:
+            print("Error: " + str(e))
+        else:
+            raise e
 
 
 if __name__ == "__main__":
