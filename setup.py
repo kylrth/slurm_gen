@@ -16,7 +16,7 @@ with open(path.join(here, "README.md"), encoding="utf-8") as f:
 
 setup(
     name="SLURM_gen",
-    version="0.1a3",
+    version="0.2",
     description=__doc__.split("\n")[0],
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -33,7 +33,6 @@ setup(
     ],
     keywords="SLURM machine-learning data",
     py_modules=["generate", "data_loading", "datasets", "utils"],
-    install_requires=["numpy", "matplotlib", "scipy", "pyMode"],
     # we need to be able to write the cache to the location where the module lives
     zip_safe=False,
 )
